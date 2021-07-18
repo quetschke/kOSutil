@@ -11,7 +11,7 @@ Burn Time, but kOS makes the
 The ``sinfo.ks`` library recalculates those and other values and provides access to the values via a
 list/lexicon structure. The values match those provided through Kerbal Engineer Redux, or MechJeb.
 
-The sinfo() function accepts a parameter to define the atmospheric pressure for in atmosphere values or
+The ``sinfo()`` function accepts a parameter to define the atmospheric pressure for in atmosphere values or
 to use the current pressure around the vessel.
  
 Caveats:
