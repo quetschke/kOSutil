@@ -31,7 +31,7 @@ maxTWR  .. max TWR
 sSLT    .. start SLT (Sea level thrust)
 maxSLT  .. max SLT
 FtV     .. thrust in vacuum
-FtA     .. thrust at current position
+FtA     .. thrust at atmospheric pressure
 KSPispV .. ISPg0 KSP - vacuum
 KERispV .. ISPg0 Kerbal Engineer Redux - vacuum
 KSPispA .. ISPg0 KSP - at atmospheric pressure
