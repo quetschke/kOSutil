@@ -1,6 +1,6 @@
-// XM2.ks - Execute maneuver node script
+// xm2.ks - Execute maneuver node script
 // Copyright © 2021 V. Quetschke
-// Version 0.3, 05/15/2021
+// Version 0.4, 07/18/2021
 @LAZYGLOBAL OFF.
 RUNONCEPATH("libcommon").
 
@@ -35,23 +35,31 @@ IF Node:BURNVECTOR:MAG > SHIP:DELTAV:CURRENT {
     SET axx TO 1/0.
 }
 
-SET TERMINAL:WIDTH TO 70.
+SET TERMINAL:WIDTH TO 76.
 SET TERMINAL:HEIGHT TO 45.
 RUNPATH("sinfo"). // Get stage info
 // Vessel info
 LOCAL si TO stinfo().
-// With "LOCAL si TO stinfo()."
-// si[stage]:key the following keys are available:
-// SMass .. startmass
-// EMass .. endmass.
-// DMass .. stagedmass.
-// BMass .. fuel burned
-// sTWR  .. start TWR
-// eTWR  .. end TWR
-// Ft    .. thrust
-// ISPg  .. ISPg0
-// dv    .. delta v
-// dur   .. burn duration
+//  returnvar[stage]:key with the following defined keys values:
+//   SMass   .. startmass
+//   EMass   .. endmass.
+//   DMass   .. stagedmass.
+//   BMass   .. fuel burned
+//   sTWR    .. start TWR
+//   maxTWR  .. max TWR
+//   sSLT    .. start SLT (Sea level thrust)
+//   maxSLT  .. max SLT
+//   FtV     .. thrust in vacuum
+//   FtA     .. thrust at current position
+//   KSPispV .. ISPg0 KSP - vacuum
+//   KERispV .. ISPg0 Kerbal Engineer Redux - vacuum
+//   KSPispA .. ISPg0 KSP - at atmospheric pressure
+//   KERispA .. ISPg0 Kerbal Engineer Redux - at atmospheric pressure
+//   VdV     .. Vacuum delta V
+//   AdV     .. Atmospheric delta V (see atmo parameter)
+//   dur     .. burn duration
+// The following key is the same for all stages:
+//   ATMO    .. Atmospheric pressure used for thrust calculation
 
 PRINT " ".
 IF si:TYPENAME() = "List" {
@@ -66,8 +74,8 @@ PRINT "s: SMass EMass DMass sTWR eTWR     Ft    ISP     dV   time".
 FROM {local s is 0.} UNTIL s > STAGE:NUMBER STEP {set s to s+1.} DO {
     PRINT s+":"+nuform(si[s]:SMass,3,2)+nuform(si[s]:EMass,3,2)
         +nuform(si[s]:DMass,3,2)+nuform(si[s]:sTWR,3,1)
-        +nuform(si[s]:eTWR,3,1)+nuform(si[s]:Ft,5,1)
-        +nuform(si[s]:ISPg,5,1)+nuform(si[s]:dv,5,1)
+        +nuform(si[s]:maxTWR,3,1)+nuform(si[s]:FtV,5,1)
+        +nuform(si[s]:KERispV,5,1)+nuform(si[s]:Vdv,5,1)
         +nuform(si[s]:dur,5,1).
 }
 
@@ -91,15 +99,15 @@ IF Node:BURNVECTOR:MAG < SHIP:STAGEDELTAV(SHIP:STAGENUM):CURRENT {
     UNTIL cumDV > Node:BURNVECTOR:MAG/2 {
         IF s < 0 { SET axx TO 1/0. } // Shouldn't happen - sanity check
         LOCAL lastDV TO Node:BURNVECTOR:MAG/2 - cumDV.
-        SET cumDV TO cumDV + si[s]:dv.
+        SET cumDV TO cumDV + si[s]:VdV.
         //PRINT lastDV.
         IF cumDV < Node:BURNVECTOR:MAG/2 {
             // Not the final stage
             SET cumTi TO cumTi + si[s]:dur + StagingDur.
         } ELSE {
-            SET cumTi TO cumTi + BurnTimeP(si[s]:SMass,lastDV,si[s]:ISPg,si[s]:Ft).
+            SET cumTi TO cumTi + BurnTimeP(si[s]:SMass,lastDV,si[s]:KERispV,si[s]:FtV).
             //PRINT "BT:".
-            //PRINT BurnTimeP(si[s]:SMass,si[s]:dv,si[s]:ISPg,si[s]:Ft).
+            //PRINT BurnTimeP(si[s]:SMass,si[s]:dv,si[s]:KERispV,si[s]:Ft).
         }
         //PRINT s+" DV: "+cumDV+" time: "+cumTi.
         SET s TO s-1.
