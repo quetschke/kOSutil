@@ -1,11 +1,13 @@
 // xm2.ks - Execute maneuver node script
 // Copyright © 2021 V. Quetschke
-// Version 0.4, 07/18/2021
+// Version 0.5, 07/18/2021
 @LAZYGLOBAL OFF.
 RUNONCEPATH("libcommon").
+SET TERMINAL:HEIGHT TO 38.
+//SET CONFIG:IPU TO 2000. // Makes the timing a little better.
 
 LOCAL WarpStopTime to 15. //custom value
-LOCAL StagingDur TO 0.58. // Time it takes to complete staging event. (measured)
+LOCAL StagingDur TO 0.58+0.01. // Time it takes to complete staging event. (measured, add 1/2 cycle)
 
 LOCAL Node to NEXTNODE.
 
@@ -35,8 +37,6 @@ IF Node:BURNVECTOR:MAG > SHIP:DELTAV:CURRENT {
     SET axx TO 1/0.
 }
 
-SET TERMINAL:WIDTH TO 76.
-SET TERMINAL:HEIGHT TO 45.
 RUNPATH("sinfo"). // Get stage info
 // Vessel info
 LOCAL si TO stinfo().
@@ -50,7 +50,7 @@ LOCAL si TO stinfo().
 //   sSLT    .. start SLT (Sea level thrust)
 //   maxSLT  .. max SLT
 //   FtV     .. thrust in vacuum
-//   FtA     .. thrust at current position
+//   FtA     .. thrust at atmospheric pressure
 //   KSPispV .. ISPg0 KSP - vacuum
 //   KERispV .. ISPg0 Kerbal Engineer Redux - vacuum
 //   KSPispA .. ISPg0 KSP - at atmospheric pressure
@@ -244,11 +244,10 @@ WHEN MAXTHRUST<stageThrust THEN { // No more fuel?
 	RETURN true. 
 }
 
-// Wait for alignment and predicted time to start the burn.
-WAIT UNTIL VANG(SHIP:FACING:FOREVECTOR,STEERING) <  1 AND TIME:SECONDS > NodeTime-BurnDur2.
+// Wait for alignment and predicted time to start the burn. (Minus a physics cycle.)
+WAIT UNTIL VANG(SHIP:FACING:FOREVECTOR,STEERING) <  1 AND TIME:SECONDS > NodeTime-BurnDur2-0.02.
+SET THROTTLE to 1. // Directly after the WAIT command. PRINT takes time!
 PRINT "Warping done.                             " at (0,8).
-
-SET THROTTLE to 1.
 PRINT "Set throttle to 100%".
 
 // Just for testing. Set throttle to 66% after the node
@@ -256,18 +255,18 @@ PRINT "Set throttle to 100%".
 //SET THROTTLE TO 0.5.
 //PRINT "Set throttle to 50".
 
-// Test how close we got to NodeTime
+// Measure how close we got to NodeTime
 WAIT UNTIL TIME:SECONDS > NodeTime.
 LOCAL NodeDV2 TO Node:DELTAV:MAG. // Remaining delta V
 PRINT "Node DV at node time: "+nuform(NodeDV2 / NodedV0:MAG,1,2).
 PRINT "Est. burn time to Node: "+nuform(BurnDur2,2,2).
-PRINT "Missed by:              "+nuform((1-2*Node:DELTAV:MAG/NodedV0:MAG)*BurnDur2,2,2)+"s".
+PRINT "Missed by:              "+nuform((1-2*NodeDV2/NodedV0:MAG)*BurnDur2,2,2)+"s".
 PRINT "Positive number means burn started early, negative means late.".
 
 // Stretch the last 1/4 second to 3 secondss
-PRINT "Waiting for 0.25s".
+PRINT "Waiting for 0.25s remaining burn time ...".
 WAIT UNTIL CanThrottle AND BurnTimeC() < 0.25.
-PRINT "Extend burn to 3s".
+PRINT "Extend burn to 3s.".
 LOCAL TSET TO BurnTimeC()/3.
 SET THROTTLE TO TSET.
 PRINT "Set throttle: "+ROUND(TSET,2).
