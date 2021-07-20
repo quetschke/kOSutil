@@ -10,12 +10,12 @@ SET TERMINAL:HEIGHT TO 45.
 // Run it at full speed!
 SET CONFIG:IPU TO 2000.
 
-RUNONCEPATH("etree7"). // Get stage info
+RUNONCEPATH("sinfo"). // Get stage info
 
 LOCAL loopTime IS TIME:SECONDS.
 
 // Vessel info
-LOCAL si TO stinfo(1). // At sea level.
+LOCAL si TO stinfo(). // At sea level.
 //  si[stage]:key with the following defined keys values:
 //   SMass   .. startmass
 //   EMass   .. endmass.
@@ -26,7 +26,7 @@ LOCAL si TO stinfo(1). // At sea level.
 //   sSLT    .. start SLT (Sea level thrust)
 //   maxSLT  .. max SLT
 //   FtV     .. thrust in vacuum
-//   FtA     .. thrust at current position
+//   FtA     .. thrust at atmospheric pressure
 //   KSPispV .. ISPg0 KSP - vacuum
 //   KERispV .. ISPg0 Kerbal Engineer Redux - vacuum
 //   KSPispA .. ISPg0 KSP - at atmospheric pressure
