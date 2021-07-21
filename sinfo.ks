@@ -1,9 +1,9 @@
 // sinfo.ks - Collect stage stats. Walk the tree starting from an engine recursively
 // Copyright © 2021 V. Quetschke
-// Version 0.6, 07/20/2021
+// Version 0.6.1, 07/21/2021
 @LAZYGLOBAL OFF.
 
-// Enabling dbg will create a logfile (0:estagedat.log) that can be used for
+// Enabling dbg will create a logfile (0:sinfo.log) that can be used for
 // improving and debugging the script.
 //LOCAL dbg TO TRUE.
 LOCAL dbg TO FALSE.
@@ -44,8 +44,13 @@ RUNONCEPATH("libcommon").
 // Staging - For stages with decouplers, KSP assumes it immediately stages after all
 // active engines connected to this decoupler are out of all available fuel.
 
-// General structure
-// This script determines the fuel per engine, or engine group (more about this below.)
+// General structure of the sinfo function
+//
+// The calculation of Delta V requires the knowledge of fuel consumption and thrust (this implies ISP and
+// mass). The overall structure is set up to find this and related information for every stage (or substage)
+// for the vessel. 
+//
+// The function determines the available fuel per engine, or engine group (more about this below.)
 // Stage numbering:
 // x Stages are counted from the current stage (STAGE:NUMBER) to 0. A value -1 is
 //   possible and means never decoupled or never activated.
@@ -55,11 +60,11 @@ RUNONCEPATH("libcommon").
 //   to track the stage when the part is still counted for the mass.
 // x part:STAGE The part gets staged/activated. ast = part:STAGE.
 //
-// The scrip tries to get a stage listing like KER/MJ, with:
+// In the end the function tries to provide stage informaton listing like KER/MJ, with:
 // "start mass, end mass, staged/dropped mass, burned fuel, TWR s/e, thrust, ISPg0, DV, duration"
 //
 // Some variables use futype as an array. With
-//   enum fu = {0=LiquidFuel, 1=Oxidizer, 2=SolidFuel, 3=XenonGas}
+//   enum fuli = {0=LiquidFuel, 1=Oxidizer, 2=SolidFuel, 3=XenonGas}
 //
 // Global variables with stage (st) info:
 //   stmass[st] Drymass in stage
@@ -76,13 +81,14 @@ RUNONCEPATH("libcommon").
 // This is done in several passes:
 // 1. First the script loops over all engines to create engine groups (eg). An eg is
 //    attached to the same fuel reservoir (connected tanks).
-//    Each eg keeps the following information in the form eg[idx]:key:
+//    Each eg keeps the information in the form eg[idx]:key:
 //      egli    List of parts in eg
 //      egtali  Holds all tanks and engines from engine group.
 //      egflli  Holds all fuel line parts from engine group.
 //      egastage Stage when eg becomes active
 //      egdstage Stage when eg is decoupled
-//      The following variables are used:
+//    The following variables are used to store stage dependent information. (They are initialized in
+//    point 3. below.:
 //      con[eg][st][fu]   Fuel consuption in eg, by stage and fuel
 //      thruV[eg][st][fu]  Thrust in eg, by stage and fuel
 //      thruA[eg][st][fu]  Thrust in eg, by stage and fuel
@@ -96,29 +102,52 @@ RUNONCEPATH("libcommon").
 //    We use some trickery to distinguish Rocket Engines for nuclear fuel engines. Rocket engines
 //    use 9u LF per 11u OX. NERV engines use only LF. Both have a density of 0.005t/u.
 //    Store rocket engines fuel only under OX and NERV fuel under LF.
-//    Some 
 //
 // 2. Loop over all parts
-//    x Check for parts not connected to an eg. (For fun)
+//    x Check for parts not connected to an eg.
 //    x Add all drymass (non consumables) to the last stage where mass is
 //      counted (p:DECOUPLEDIN+1).
 //    x Correct for fairing panel mass
 //    x Add fuel from tanks not in engine groups to stage mass. Also add fuel that is not used by
 //      the supported engines (fuli[]).
 //
-// 3. Loop over engine groups and check for fuel ducts.
+// 3. Loop over engine groups
+//    x Initialize variables.
+//    x Check for fuel ducts and find targets.
 //    Note: Not supported yet.
 //    The plan is to create a list of all eg that deliver fuel to an eg.
 //    Then calculate the burn times for the source and target egs. Needs further thought.
 //
-// 4. Loop over engine groups to collect consumption, thrust and fuel mass.
+// 4. Loop over engine groups to collect consumption, thrust and fuel mass information.
 //
 // 5. Calculate burn duration for egs, for all fuels. Look for the maximum duration of decoupled stages,
-//    if it doesn't exist, use the overall maximum burn time for the stage. Move fuel if the maximum
-//    decoupled stage burn time is shorter than the maximum non-decoupled stage burn time..
+//    if it doesn't exist, use the overall maximum burn time for the stage. Move fuel and adjust burn
+//    duration if the maximum decoupled stage burn time is shorter than the maximum non-decoupled stage
+//    burn time..
 //
-// 6. Initialize sub-stages burn info in sub[s][i]:XX with XX = bt, eg, fu, bt2, con, thru.
-//    Note: Explain!
+// 6. Initialize sub-stage information
+//    Delta V calculation depends on fuel consumption and thrust (this implies ISP and mass), but when
+//    different fuel engine groups burn for different lengths of time during a stage one needs to break
+//    the stage into substages, each with different consuption and thrust information that is accumulated
+//    from the eg at the various times during the stage. The substages incoorporate the information of all
+//    active engine groups during the stage and the substages will be sorted from shortest burn duration
+//    to longest. Inactive or empty (no consumption) substages will be removed.
+//    The information is stored in sub[s][i]:XX with XX =
+//     bt ..  Total burn duration of engine group (=burn[eg][st][fu])
+//     eg ..  engine group
+//     fu ..  fuel type (actually engine type)
+//     bt2 .. Burn duration of current substage. This is best explained with an example, lets assume the
+//            current stage has three burn durations, and hence three substages (i=0,1,2):
+//              sub[s][i=0]:bt = burn[0][st][2=SolidFuel] = 1s, (SRBs)
+//              sub[s][i=1]:bt = burn[1][st][1=Oxidizer] = 2s. (Another eg with rocket engines)
+//              sub[s][i=2]:bt = burn[0][st][1=Oxidizer] = 4s, ( Rocket engines)
+//            In the first substage all three fueg are active, in the second substage the second and third
+//            fueg are still on and in the third only the last fueg is still burning.
+//            The substage duration (bt2) is the time that is spent in that substage, with the number of
+//            active fueg. So sub[s][i=0]:bt2 = 1s, sub[s][i=1]:bt2 = 1s, sub[s][i=2]:bt2 = 2s. 
+//     con .. Total fuel consumption of the active fueg.
+//     thruV .. Total vac thrust of the active fueg.
+//     thruA .. Total thrust of the active fueg at atmospheric pressure.
 //
 // 7. Finally calculate mass, ISP, dV, thrust, TWR, burntime
 
@@ -163,11 +192,11 @@ FUNCTION stinfo {
     LOCAL ox2lf TO 9.0/11.0.
 
     LOCAL procli TO LIST(). // Holds all processed parts.
-    LOCAL egli TO LIST(). // Holds all engine group parts.
+    LOCAL egli TO LIST().   // Holds all engine group parts.
     LOCAL egtali TO LIST(). // Holds all tanks and engines from engine group.
     LOCAL egflli TO LIST(). // Holds all fuel line parts from engine group.
-    LOCAL egastage TO 999. // Use this as the stage the current engine group becomes active
-    LOCAL egdstage TO 999. // The stage when current engine has been removed
+    LOCAL egastage TO 999.  // Use this as the stage the current engine group becomes active
+    LOCAL egdstage TO 999.  // The stage when current engine has been removed
 
     LOCAL prili TO LIST("Decoupler","Engine").
     LOCAL nocflist TO LIST("I-Beam", "Strut Connector", "Structural Panel").
@@ -182,12 +211,12 @@ FUNCTION stinfo {
     LOCAL fuliZ TO LIST(0,0,0,0). // Placeholder for fuel types
 
     // Will be initialized after eg loop to:
-    LOCAL con TO LIST().  // con[eg][st][fu]   Fuel consuption in eg, by stage and fuel
-    LOCAL thruV TO LIST(). // thruV[eg][st][fu]  Vac thrust in eg, by stage and fuel
-    LOCAL thruA TO LIST(). // thruA[eg][st][fu]  Atmospheric thrust in eg, by stage and fuel
-    LOCAL fma TO LIST().  // fma[eg][st][fu]   Fuel mass in eg, by stage and fuel
-    LOCAL flt TO LIST().  // flt[eg][st][fu]   Fuel mass left in eg, by stage and fuel
-    LOCAL burn TO LIST(). // burn[[eg][st][fu] Burn time in eg, by stage and fuel
+    LOCAL con TO LIST().   // con[eg][st][fu]   Fuel consuption in eg, by stage and fuel
+    LOCAL thruV TO LIST(). // thruV[eg][st][fu] Vac thrust in eg, by stage and fuel
+    LOCAL thruA TO LIST(). // thruA[eg][st][fu] Atmospheric thrust in eg, by stage and fuel
+    LOCAL fma TO LIST().   // fma[eg][st][fu]   Fuel mass in eg, by stage and fuel
+    LOCAL flt TO LIST().   // flt[eg][st][fu]   Fuel mass left in eg, by stage and fuel
+    LOCAL burn TO LIST().  // burn[[eg][st][fu] Burn time in eg, by stage and fuel
 
     // 1. First the script loops over all engines to create engine groups (eg)
     LOCAL elist TO -999. LIST ENGINES IN elist.
@@ -292,7 +321,7 @@ FUNCTION stinfo {
     }
 
 
-    // 3. Loop over engine groups
+    // 3. Loop over engine groups - Initialize variables and follow fuel ducts.
     IF dbg { mLog(" "). }
     FROM {LOCAL i is 0.} UNTIL i > eg:LENGTH-1 STEP {set i to i+1.} DO {
         // Initialize variables 3-D lists for all eg:
@@ -311,7 +340,7 @@ FUNCTION stinfo {
             SET burn[i][s] TO fuliZ:COPY.  // Now [eg][st][fu]
         }
 
-        // Check where fuel lines go.
+        // Check where fuel ducts go.
         // Note: This doesn't do anything yet.
         FOR fl IN eg[i]:egflli {
             LOCAL pa TO fl:DECOUPLER:PARENT.
@@ -464,7 +493,7 @@ FUNCTION stinfo {
             }
             mLog(sstring).
         }
-        // Find burn durations
+        // Find burn durations for eg
         FROM {LOCAL e is 0.} UNTIL e > eg:LENGTH-1 STEP {set e to e+1.} DO {
             // First calculate burn time per eg and fuel type at this stage.
             IF s <= eg[e]:egastage AND s > eg[e]:egdstage { // Only consider active egs
@@ -525,7 +554,7 @@ FUNCTION stinfo {
         // If nothing decouples, use maximum burn time.
         IF stburn[s] = 0 { SET stburn[s] TO maxBRemEg. }
 
-        // Work on burn duration
+        // Adjust eg burn time, fuel and unused fuel.
         FROM {LOCAL e is 0.} UNTIL e > eg:LENGTH-1 STEP {set e to e+1.} DO {
             // Now check how much fuel gets transfered.
             IF s <= eg[e]:egastage AND s > eg[e]:egdstage {
@@ -575,29 +604,14 @@ FUNCTION stinfo {
     // Print/Log consumption, thrust and mass info for all egs, s and f after corrections
     egLog().
 
-    // 6. Initialize sub-stages burn info in sub[s][i]:XX with XX =
-    // bt .. Total burn duration of engine group (=burn[eg][st][fu])
-    // eg .. engine group
-    // fu .. fuel type (actually engine type)
-    // bt2 .. Burn duration of current substage. This is best explained with an example, lets assume the
-    //        current stage has three burn durations, and hence three substages (i=0,1,2):
-    //          sub[s][i=0]:bt = burn[0][st][2=SolidFuel] = 1s, (SRBs)
-    //          sub[s][i=1]:bt = burn[1][st][1=Oxidizer] = 2s. (Another eg with rocket engines)
-    //          sub[s][i=2]:bt = burn[0][st][1=Oxidizer] = 4s, ( Rocket engines)
-    //        In the first substage all three fueg are active, in the second substage the second and third
-    //        fueg are still on and in the third only the last fueg is still burning.
-    //        The substage duration (bt2) is the time that is spent in that substage, with the number of
-    //        active fueg. So sub[s][i=0]:bt2 = 1s, sub[s][i=1]:bt2 = 1s, sub[s][i=2]:bt2 = 2s. 
-    // con .. Total fuel consumption of the active fueg.
-    // thruV .. Total vac thrust of the active fueg.
-    // thruA .. Total thrust of the active fueg at atmospheric pressure.
+    // 6. Initialize sub-stage information
+    // The information is stored in sub[s][i]:XX with XX = bt, eg, fu, bt2, con, thruV and thruA
     IF dbg { mLog("-----"). }
     LOCAL sub TO LIST().
     LOCAL lex TO LEXICON().
     // Create sorted sub[s][i]:XX. Sorted in i by shortest to longest burntime of substage (Zero burn
     // durations are omitted). In eg and fu are the indices to find the corresponding con[eg][st][fu],
-    // thruV[..], fma[..], flt[..] and burn[..] values.
-    // Burn[..] is also stored in sub[s][i]:bt.
+    // thruV[..], thruA[..], fma[..], flt[..] and burn[..] values.
     FROM {LOCAL s is 0.} UNTIL s > STAGE:NUMBER STEP {set s to s+1.} DO {
         IF dbg { mLog( "s: "+s). }
         sub:ADD(LIST()).
@@ -716,10 +730,10 @@ FUNCTION stinfo {
                 SET curmass TO submass. // The next substage starts with the current substge end mass.
             }
         }
-        LOCAL kerispV TO 0. // ISPg0 vac like MJ/KER uses
+        LOCAL KERispV TO 0. // ISPg0 vac like MJ/KER uses
         LOCAL KERispA TO 0. // ISPg0 sea level like MJ/KER uses
         IF stVdV {
-            SET kerispV TO stVdV/CONSTANT:g0/LN(startmass/endmass).
+            SET KERispV TO stVdV/CONSTANT:g0/LN(startmass/endmass).
             SET KERispA TO stAdV/CONSTANT:g0/LN(startmass/endmass).
         }
         // Sanity check
@@ -729,7 +743,7 @@ FUNCTION stinfo {
             mLog(" ").
         }
         
-        LOCAL kspispV IS 0.
+        LOCAL KSPispV IS 0.
         LOCAL KSPispA IS 0.
         LOCAL thruV IS stithruV[s].// Thrust in stage (vacuum).
         LOCAL thruA IS stithruA[s].// Thrust in stage (current position).
@@ -739,7 +753,7 @@ FUNCTION stinfo {
         }
         // Note: We cannot average over different burn times. Use sub-stages by burn time.
         IF sticon[s] > 0 {
-            SET kspispV TO thruV/sticon[s]/CONSTANT:g0.
+            SET KSPispV TO thruV/sticon[s]/CONSTANT:g0.
             SET KSPispA TO thruA/sticon[s]/CONSTANT:g0.
         }
 
@@ -753,8 +767,8 @@ FUNCTION stinfo {
         SET sinfo["maxSLT"] TO maxSLT.
         SET sinfo["FtV"] TO thruV.
         SET sinfo["FtA"] TO thruA.
-        SET sinfo["KSPispV"] TO kspispV.
-        SET sinfo["KERispV"] TO kerispV.
+        SET sinfo["KSPispV"] TO KSPispV.
+        SET sinfo["KERispV"] TO KERispV.
         SET sinfo["KSPispA"] TO KSPispA.
         SET sinfo["KERispA"] TO KERispA.
         SET sinfo["VdV"] TO stVdV.
@@ -773,7 +787,7 @@ FUNCTION stinfo {
             mLog(s+","+nuform(startmass,3,3)+","+nuform(endmass,3,3)+","+nuform(stagedmass,3,3)
                 +","+nuform(fuburn,3,3)+","+nuform(fuleft,3,3)+","+nuform(thruV,4,2)+","
                 +nuform(thruA,4,2)+","
-                +nuform(kspispV,4,2)+","+nuform(kerispV,4,2)+","+nuform(sTWR,3,3)+","+nuform(maxTWR,3,3)+","
+                +nuform(KSPispV,4,2)+","+nuform(KERispV,4,2)+","+nuform(sTWR,3,3)+","+nuform(maxTWR,3,3)+","
                 +nuform(sSLT,3,3)+","+nuform(maxSLT,3,3)+","
                 +nuform(stVdV,5,1)+","+nuform(SHIP:STAGEDELTAV(s):VACUUM,5,1)+","+nuform(stburn[s],5,1)
             ).
@@ -797,10 +811,6 @@ FUNCTION stinfo {
             //PRINT "Already processed! Skipped ..".
             RETURN False.
         }
-
-        // Todo: Delete after testing - likely unneeded.
-        //LOCAL lst is p:DECOUPLEDIN+1.  // Last stage where mass is counted
-        //LOCAL pmass IS p:DRYMASS.      // Fairings change mass. Need this as variable
 
         LOCAL xfeed TO True. // For parts where crossfeed can be modified.
         LOCAL thisEg TO True. // Part belongs to this eg.
