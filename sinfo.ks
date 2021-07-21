@@ -1,6 +1,6 @@
 // sinfo.ks - Collect stage stats. Walk the tree starting from an engine recursively
 // Copyright © 2021 V. Quetschke
-// Version 0.5, 07/18/2021
+// Version 0.6, 07/20/2021
 @LAZYGLOBAL OFF.
 
 // Enabling dbg will create a logfile (0:estagedat.log) that can be used for
@@ -122,7 +122,7 @@ RUNONCEPATH("libcommon").
 //
 // 7. Finally calculate mass, ISP, dV, thrust, TWR, burntime
 
-DELETEPATH("0:etree.log").
+DELETEPATH("0:sinfo.log").
 
 //stinfo().
 // End of program!
@@ -133,7 +133,7 @@ FUNCTION mLog {
             t IS 3. // 1 = LOG, 2 = PRINT, 3 = Both
     
     // TODO: Use t
-    LOG s TO "0:etree.log".
+    LOG s TO "0:sinfo.log".
     PRINT s.
     
     RETURN 1.
@@ -543,12 +543,16 @@ FUNCTION stinfo {
                         SET stleft[s] TO stleft[s] + flt[e][s][f].
                     }
                 } ELSE {
-                    // This eg remains. Check for leftover fuel and move it to the next stage.
+                    // This eg remains. Adjust the burn duration, check for leftover fuel and move it to
+                    // the next stage.
                     IF dbg { mLog("Stays - eg: "+e+" burn: "+ROUND(egBurn[e],2)
                             +" move "+ROUND(egBurn[e] - maxBDecEg,2)+" s fuel."). }
                     FROM {LOCAL f is 0.} UNTIL f > fuli:LENGTH-1 STEP {SET f to f+1.} DO {
-                        LOCAL burnDur TO MIN(stburn[s], burn[e][s][f]).
-                        IF dbg { mLog("burn: "+burn[e][s][f]). }
+                        // Adjust burn duration for fueg
+                        IF burn[e][s][f] > maxBDecEg {
+                            SET burn[e][s][f] TO maxBDecEg.
+                        }
+                        LOCAL burnDur TO burn[e][s][f].
                         LOCAL FuBurned TO burnDur * con[e][s][f].
                         IF f = LFidx { // Inlude LF from REs
                             LOCAL burnDurOX TO MIN(stburn[s], burn[e][s][OXidx]).
