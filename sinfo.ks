@@ -1,6 +1,6 @@
 // sinfo.ks - Collect stage stats. Walk the tree starting from an engine recursively
 // Copyright © 2021 V. Quetschke
-// Version 0.6.1, 07/21/2021
+// Version 0.6.2, 07/22/2021
 @LAZYGLOBAL OFF.
 
 // Enabling dbg will create a logfile (0:sinfo.log) that can be used for
@@ -82,9 +82,11 @@ RUNONCEPATH("libcommon").
 // 1. First the script loops over all engines to create engine groups (eg). An eg is
 //    attached to the same fuel reservoir (connected tanks).
 //    Each eg keeps the information in the form eg[idx]:key:
-//      egli    List of parts in eg
-//      egtali  Holds all tanks and engines from engine group.
-//      egflli  Holds all fuel line parts from engine group.
+//      egli     List of parts in eg
+//      egtali   Holds all tanks and engines from engine group.
+//      egfdli   Holds all fuel duct parts from engine group. (Currently only one fuel duct per engine
+//               group is supported.)
+//      egfddest Holds the destination eg for the fuel duct parts from engine group.
 //      egastage Stage when eg becomes active
 //      egdstage Stage when eg is decoupled
 //    The following variables are used to store stage dependent information. (They are initialized in
@@ -117,6 +119,8 @@ RUNONCEPATH("libcommon").
 //    Note: Not supported yet.
 //    The plan is to create a list of all eg that deliver fuel to an eg.
 //    Then calculate the burn times for the source and target egs. Needs further thought.
+//    Global variables added in this loop:
+//      fdtotal     Number of active fuel ducts.
 //
 // 4. Loop over engine groups to collect consumption, thrust and fuel mass information.
 //
@@ -191,12 +195,14 @@ FUNCTION stinfo {
     // 9lf to 11ox is the Kerbal rocket fuel relationship. Set that as a const.
     LOCAL ox2lf TO 9.0/11.0.
 
-    LOCAL procli TO LIST(). // Holds all processed parts.
-    LOCAL egli TO LIST().   // Holds all engine group parts.
-    LOCAL egtali TO LIST(). // Holds all tanks and engines from engine group.
-    LOCAL egflli TO LIST(). // Holds all fuel line parts from engine group.
-    LOCAL egastage TO 999.  // Use this as the stage the current engine group becomes active
-    LOCAL egdstage TO 999.  // The stage when current engine has been removed
+    LOCAL procli TO LIST().  // Holds all processed parts.
+    LOCAL egli TO LIST().    // Holds all engine group parts.
+    LOCAL egtali TO LIST().  // Holds all tanks and engines from engine group.
+    LOCAL egfdli TO LIST().  // Holds all fuel line parts from engine group.
+    LOCAL egfddest TO LIST().// Holds all fuel duct eg destinations from engine group
+    LOCAL egastage TO 999.   // Use this as the stage the current engine group becomes active
+    LOCAL egdstage TO 999.   // The stage when current engine has been removed
+    LOCAL fdtotal TO 0.      // Numer of all active fuel ducts across all eg.
 
     LOCAL prili TO LIST("Decoupler","Engine").
     LOCAL nocflist TO LIST("I-Beam", "Strut Connector", "Structural Panel").
@@ -231,7 +237,8 @@ FUNCTION stinfo {
         SET egdstage TO e:DECOUPLEDIN. // The stage when current engine has been removed
         SET egli TO LIST(). // Collect engine group list
         SET egtali TO LIST(). // Holds all tanks and engines from engine group.
-        SET egflli TO LIST(). // Holds all fuel line parts from engine group.
+        SET egfdli TO LIST(). // Holds all fuel line parts from engine group.
+        SET egfddest TO LIST(). // Holds all fuel duct eg destinations from engine group.
 
         IF eTree(e,0) { // Find the engine group where this engine belongs to.
             // Successfully returned
@@ -240,7 +247,8 @@ FUNCTION stinfo {
             SET eg[egidx] TO LEXICON().
             SET eg[egidx]["egli"] TO egli.
             SET eg[egidx]["egtali"] TO egtali.
-            SET eg[egidx]["egflli"] TO egflli.
+            SET eg[egidx]["egfdli"] TO egfdli.
+            SET eg[egidx]["egfddest"] TO egfddest.
             SET eg[egidx]["egastage"] TO egastage.
             SET eg[egidx]["egdstage"] TO egdstage.
 
@@ -342,24 +350,88 @@ FUNCTION stinfo {
 
         // Check where fuel ducts go.
         // Note: This doesn't do anything yet.
-        FOR fl IN eg[i]:egflli {
-            LOCAL pa TO fl:DECOUPLER:PARENT.
-            LOCAL ch TO fl:DECOUPLER:CHILDREN[0].
-            LOCAL fulinetarget TO pa.
-            IF eg[i]:egli:CONTAINS(pa) {
-                // Decoupler parent is in current eg.
-                SET fulinetarget TO ch.
+        IF eg[i]:egfdli:LENGTH > 1 {
+            PRINT " ".
+            PRINT "The sinfo library supports only one fuel duct going out of a engine group!".
+            PRINT " ".
+            PRINT 1/0.
+        }
+        // This loop is either executed once, or not at all.
+        FOR fl IN eg[i]:egfdli {
+            IF dbg {mLog("Fuel duct in eg: "+i). }
+            LOCAL fulinetarget TO False.
+            // Every part has a tag
+            LOCAL kTag TO fl:GETMODULE("KOSNameTag"):GETFIELD("name tag").
+            // Or kTag = fl:TAG ???
+            IF kTag = "" {
+                SET kTag TO "<none>".
+            } ELSE {
+                IF kTag = "<none>" {
+                    PRINT "Fuel Ducts cannot have a kOS tag with the value <none>.".
+                    PRINT "That tag value us used for internal fuel duct processing,".
+                    PRINT "Please use a different tag to identify fuel duct targets.".
+                    PRINT " ".
+                    RETURN 0.
+                }
+                // Find corresponding tags
+                LOCAL alltags TO SHIP:PARTSTAGGED(kTag).
+                LOCAL alltags2 TO LIST().
+                FOR p IN alltags {
+                    IF p:NAME <> "fuelLine" {
+                        alltags2:ADD(p).
+                    }
+                    IF dbg { mLog("Tag: "+kTag+" Part: "+p:TITLE). }
+                }
+                IF alltags2:LENGTH <> 1 {
+                    PRINT "There needs to be exactly one target part with the same".
+                    PRINT "kOS name tag as the fuel duct!".
+                    PRINT "Found: "+alltags2:LENGTH+" targets with kOS tag: "+ktag.
+                    PRINT "The tag will be ignored and the decoupler logic be used.".
+                    PRINT " ".
+                    SET kTag TO "<none>".
+                } ELSE {
+                    SET fulinetarget TO alltags2[0].
+                }
             }
-            // Decoupler child is in current eg.
-            LOCAL fltarget TO -1.
+            IF kTag = "<none>" {
+                // Find the eg of the other side of the decoupling decoupler.
+                LOCAL pa TO fl:DECOUPLER:PARENT.
+                LOCAL ch TO fl:DECOUPLER:CHILDREN[0].
+                // Assume the decoupler child is in current eg.
+                SET fulinetarget TO pa.
+                IF eg[i]:egli:CONTAINS(pa) {
+                    // No, the decoupler parent is in current eg.
+                    SET fulinetarget TO ch.
+                }
+            }
+            // Find the eg the fuel duct is pointing to.
+            LOCAL fddesteg TO -1.
             FROM {LOCAL x IS 0.} UNTIL x >= eg:LENGTH STEP {SET x to x+1.} DO {
                 IF eg[x]:egli:CONTAINS(fulinetarget) {
-                    SET fltarget TO x.
+                    SET fddesteg TO x.
                     BREAK.
                 }
             }
-            IF dbg { mLog("Eg "+i+" has fuel line connected to eg: "+fltarget+"."). }
+            // Now, if the decoupler has crossfeed enabled, or the kTag target is pointing to the same
+            // eg, the fuel duct has no effect and can be ignored.
+            IF fddesteg = i {
+                mLog("ignore fuel duct!").
+            } ELSE {
+                eg[i]:egfddest:ADD(fddesteg). // Add to fuel duct eg destination list.
+                SET fdtotal TO fdtotal + 1.
+            }
+            IF dbg { mLog("FD: eg "+i+" -> eg "+fddesteg+"/"+fulinetarget:TITLE+"/kOS tag: "+kTag). }
         }
+    }
+
+    // Warn and abort if fuel ducts are used.
+    IF fdtotal > 0 {
+        PRINT " ".
+        PRINT "Fuel ducts are not yet supported.".
+        PRINT "Found: "+fdtotal+" active fuel ducts.".
+        PRINT "Aborting as the stage information would be incorrect.".
+        PRINT " ".
+        RETURN 0.
     }
 
 
@@ -801,7 +873,7 @@ FUNCTION stinfo {
     // Local (nested) functions:
     FUNCTION eTree {
         // This function walks the parts tree recoursively and collects values in
-        // egli, egtali, egflli, egastage, egdstage.
+        // egli, egtali, egfdli, egastage, egdstage.
         // In procli all parts that have been assigned to an eg will be remembered.
         // The function returns False if the first part it gets called on is already in an engine group.
         PARAMETER p,    // Part node.
@@ -830,16 +902,7 @@ FUNCTION stinfo {
         }
 
         IF p:NAME = "fuelLine" {
-            // Unfortunately no target information available. See kOS issue #1974
-            // Workaround: Use the other side of the decoupler as the target EG.
-            IF p:DECOUPLER:GETMODULE("ModuleToggleCrossfeed"):HASEVENT("disable crossfeed") {
-                mLog("  !!!").
-                mLog("Fuel line is attached to decoupler with crossfeed enabled!").
-                mLog("DO NOT DO THAT - not supprted - ignored!").
-                mLog("  !!!").
-            } ELSE {
-                egflli:ADD(p).
-            }
+            egfdli:ADD(p).
         }.
         
         IF p:HASMODULE("ModuleToggleCrossfeed") {
