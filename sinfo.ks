@@ -14,7 +14,7 @@ RUNONCEPATH("libcommon").
 
 // stinfo([atmo]) description
 // stinfo takes the following (optional) parameter:
-//   atmo:  Determinest atmostpheric pressure used.
+//   atmo:  Determines atmostpheric pressure to be used.
 //     any non scalar   (default) Any non number value sets pressure to the current pressure.
 //     0 to 100         A numeric value of zero to 100 sets the atmostpheric pressure
 // The functions returns:
@@ -253,10 +253,8 @@ FUNCTION stinfo {
             SET eg[egidx]["egdstage"] TO egdstage.
 
             SET egidx TO egidx+1.
-        } ELSE {
-            // This engine is already part of another eg.
-            BREAK.
         }
+        // If False, this engine is already part of another eg.
         IF dbg { mLog(" "). }
     }
 
@@ -520,12 +518,10 @@ FUNCTION stinfo {
                             SET stithruV[s] TO stithruV[s] + thruVF[x].
                             SET stithruA[s] TO stithruA[s] + thruAF[x].
                         }
-                    } ELSE {
-                        // Add zeroes
-                        SET con[i][s] TO fuliZ:COPY.
-                        SET thruV[i][s] TO fuliZ:COPY.
-                        SET thruA[i][s] TO fuliZ:COPY.
                     }
+                    // It is wrong to add zeroes (especially with fuliZ:COPY) as other engines in this eg
+                    // can have different x:STAGE or x:DECOUPLEDIN values. The xx[i][s][x] lists are initialized
+                    // to zero intitially.
                 }
             }
             // Part with fuel (Tank or SRB)
