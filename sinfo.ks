@@ -1,12 +1,18 @@
-// sinfo.ks - Collect stage stats. Walk the tree starting from an engine recursively
+// sinfo2.ks - Collect stage stats. Walk the tree starting from an engine recursively
 // Copyright © 2021 V. Quetschke
-// Version 0.6.2, 07/22/2021
+// Version 0.8.3, 08/10/2021
+// Start cutting
 @LAZYGLOBAL OFF.
 
 // Enabling dbg will create a logfile (0:sinfo.log) that can be used for
 // improving and debugging the script.
 //LOCAL dbg TO TRUE.
 LOCAL dbg TO FALSE.
+
+// TODO: drop-tanks
+// TODO: SRBs share fuel in eg, but not in "reality". Average consuption and fuelmass for SRBs will fail for
+//       "unmatched" SRBs. Possible solution: Create an eg for every SRB. Maybe later ...
+
 
 RUNONCEPATH("libcommon").
 
@@ -48,7 +54,7 @@ RUNONCEPATH("libcommon").
 //
 // The calculation of Delta V requires the knowledge of fuel consumption and thrust (this implies ISP and
 // mass). The overall structure is set up to find this and related information for every stage (or substage)
-// for the vessel. 
+// for the vessel.
 //
 // The function determines the available fuel per engine, or engine group (more about this below.)
 // Stage numbering:
@@ -77,7 +83,7 @@ RUNONCEPATH("libcommon").
 //   stburn[st] Burn duration of stage
 //   stfuel[st] Fuel in stage
 //   stleft[st] Unburned left fuel in stage
-//   
+//
 // This is done in several passes:
 // 1. First the script loops over all engines to create engine groups (eg). An eg is
 //    attached to the same fuel reservoir (connected tanks).
@@ -87,6 +93,7 @@ RUNONCEPATH("libcommon").
 //      egfdli   Holds all fuel duct parts from engine group. (Currently only one fuel duct per engine
 //               group is supported.)
 //      egfddest Holds the destination eg for the fuel duct parts from engine group.
+//      egfdsrc  Holds the fd source egs for the engine group.
 //      egastage Stage when eg becomes active
 //      egdstage Stage when eg is decoupled
 //    The following variables are used to store stage dependent information. (They are initialized in
@@ -94,9 +101,6 @@ RUNONCEPATH("libcommon").
 //      con[eg][st][fu]   Fuel consuption in eg, by stage and fuel
 //      thruV[eg][st][fu]  Thrust in eg, by stage and fuel
 //      thruA[eg][st][fu]  Thrust in eg, by stage and fuel
-//      fma[eg][st][fu]   Fuel mass in eg, by stage and fuel
-//      flt[eg][st][fu]   Fuel mass left in eg, by stage and fuel
-//      burn[eg][st][fu]  Burn time in eg, by stage and fuel
 //    As each eg is actually subdivided in fu groups by fuel, we sometime use fuel engine group (fueg) to
 //    describe the possible fuel dependent engine groups that use different fuels and can have different
 //    burn durations within one engine group.
@@ -116,44 +120,37 @@ RUNONCEPATH("libcommon").
 // 3. Loop over engine groups
 //    x Initialize variables.
 //    x Check for fuel ducts and find targets.
-//    Note: Not supported yet.
+//    
 //    The plan is to create a list of all eg that deliver fuel to an eg.
-//    Then calculate the burn times for the source and target egs. Needs further thought.
+//    Then calculate the burn times for the source and target egs.
 //    Global variables added in this loop:
 //      fdtotal     Number of active fuel ducts.
+//      actfdstart     List of eg that have a fd without being fed by one.
+//      actfdend       List of eg that are being fed by a fd without having one going out.
+//
+// 3a. Loop to show FD debug output
 //
 // 4. Loop over engine groups to collect consumption, thrust and fuel mass information.
+//    Set fd-downstream consumption, thrust and fuel info per eg, fu:
+//      conW[eg][fu]    Fuel consuption in eg, by stage and fuel
+//      thruVW[eg][fu]  Thrust in eg, by fuel
+//      thruAW[eg][fu]  Thrust in eg, by fuel
+//      cfma[eg][fu]    Fuel mass in eg, fu. Gets updated during substage calculation.
 //
-// 5. Calculate burn duration for egs, for all fuels. Look for the maximum duration of decoupled stages,
-//    if it doesn't exist, use the overall maximum burn time for the stage. Move fuel and adjust burn
-//    duration if the maximum decoupled stage burn time is shorter than the maximum non-decoupled stage
-//    burn time..
-//
-// 6. Initialize sub-stage information
+// 5. Loop over stages and create substage information.
 //    Delta V calculation depends on fuel consumption and thrust (this implies ISP and mass), but when
 //    different fuel engine groups burn for different lengths of time during a stage one needs to break
 //    the stage into substages, each with different consuption and thrust information that is accumulated
-//    from the eg at the various times during the stage. The substages incoorporate the information of all
-//    active engine groups during the stage and the substages will be sorted from shortest burn duration
-//    to longest. Inactive or empty (no consumption) substages will be removed.
-//    The information is stored in sub[s][i]:XX with XX =
-//     bt ..  Total burn duration of engine group (=burn[eg][st][fu])
-//     eg ..  engine group
-//     fu ..  fuel type (actually engine type)
-//     bt2 .. Burn duration of current substage. This is best explained with an example, lets assume the
-//            current stage has three burn durations, and hence three substages (i=0,1,2):
-//              sub[s][i=0]:bt = burn[0][st][2=SolidFuel] = 1s, (SRBs)
-//              sub[s][i=1]:bt = burn[1][st][1=Oxidizer] = 2s. (Another eg with rocket engines)
-//              sub[s][i=2]:bt = burn[0][st][1=Oxidizer] = 4s, ( Rocket engines)
-//            In the first substage all three fueg are active, in the second substage the second and third
-//            fueg are still on and in the third only the last fueg is still burning.
-//            The substage duration (bt2) is the time that is spent in that substage, with the number of
-//            active fueg. So sub[s][i=0]:bt2 = 1s, sub[s][i=1]:bt2 = 1s, sub[s][i=2]:bt2 = 2s. 
+//    from the eg at the various times during the stage.
+//    Starting with the shortest burns assures that all active engines are burned at the beginning and later
+//    burns have less and less engines (consumption/thrust) participating.
+//    The information is stored in sub[s][i]:XX with XX = bt, con, thruV and thruA
+//     bt ..  Burn duration of current substage.
 //     con .. Total fuel consumption of the active fueg.
 //     thruV .. Total vac thrust of the active fueg.
 //     thruA .. Total thrust of the active fueg at atmospheric pressure.
 //
-// 7. Finally calculate mass, ISP, dV, thrust, TWR, burntime
+// 6. Finally calculate mass, ISP, dV, thrust, TWR, burntime, etc.
 
 DELETEPATH("0:sinfo.log").
 
@@ -164,11 +161,11 @@ DELETEPATH("0:sinfo.log").
 FUNCTION mLog {
     PARAMETER s,    // String
             t IS 3. // 1 = LOG, 2 = PRINT, 3 = Both
-    
+
     // TODO: Use t
     LOG s TO "0:sinfo.log".
     PRINT s.
-    
+
     RETURN 1.
 }
 
@@ -177,10 +174,12 @@ FUNCTION stinfo {
                                  // A numeric value of zero or larger is used as pressure.
                                  // Anything else means use current pressure.
 
+    LOCAL sub TO LIST(). // Substage info
     // Initialize a list of zeroes.
     LOCAL stZ TO LIST().
     FROM {LOCAL s IS 0.} UNTIL s > STAGE:NUMBER STEP {SET s TO s+1.} DO {
-      stZ:ADD(0).
+        stZ:ADD(0).
+        sub:ADD(LIST()).
     }
     LOCAL stmass TO stZ:COPY.
     LOCAL sticon TO stZ:COPY.
@@ -189,7 +188,7 @@ FUNCTION stinfo {
     LOCAL stburn TO stZ:COPY.
     LOCAL stfuel TO stZ:COPY.
     LOCAL stleft TO stZ:COPY.
-    
+
     LOCAL sinfolist TO stZ:COPY. // List to store the stage info
 
     // 9lf to 11ox is the Kerbal rocket fuel relationship. Set that as a const.
@@ -199,30 +198,44 @@ FUNCTION stinfo {
     LOCAL egli TO LIST().    // Holds all engine group parts.
     LOCAL egtali TO LIST().  // Holds all tanks and engines from engine group.
     LOCAL egfdli TO LIST().  // Holds all fuel line parts from engine group.
-    LOCAL egfddest TO LIST().// Holds all fuel duct eg destinations from engine group
     LOCAL egastage TO 999.   // Use this as the stage the current engine group becomes active
     LOCAL egdstage TO 999.   // The stage when current engine has been removed
-    LOCAL fdtotal TO 0.      // Numer of all active fuel ducts across all eg.
 
-    LOCAL prili TO LIST("Decoupler","Engine").
+    LOCAL fdtotal TO 0.      // Numer of all active fuel ducts across all eg.
+    LOCAL actfdstart TO LIST(). // List of eg that have no incoming fd.
+    LOCAL actfdend TO LIST().   // List of eg that have no outgoing fd.
+
     LOCAL nocflist TO LIST("I-Beam", "Strut Connector", "Structural Panel").
     // The list of fuels known to this script. Might grow for newer versions or mods
     LOCAL fuli TO LIST("LiquidFuel", "Oxidizer", "SolidFuel", "XenonGas").
     // We use the variables to identify LF and OX.
     LOCAL LFidx TO fuli:FIND("LiquidFuel").
     LOCAL OXidx TO fuli:FIND("Oxidizer").
+    LOCAL SOidx TO fuli:FIND("SolidFuel").
+    LOCAL XEidx TO fuli:FIND("XenonGas").
     LOCAL fuCorr TO LIST(1, 1, 1, 1).
-    // Used to correct stmass[] for LF in REs. 
+    // Used to correct stmass[] for LF in REs.
     SET fuCorr[OXidx] TO 20/11.
     LOCAL fuliZ TO LIST(0,0,0,0). // Placeholder for fuel types
+    LOCAL fuMin TO 1e-6.    // The amount of fuel that counts as zero
 
     // Will be initialized after eg loop to:
     LOCAL con TO LIST().   // con[eg][st][fu]   Fuel consuption in eg, by stage and fuel
     LOCAL thruV TO LIST(). // thruV[eg][st][fu] Vac thrust in eg, by stage and fuel
     LOCAL thruA TO LIST(). // thruA[eg][st][fu] Atmospheric thrust in eg, by stage and fuel
-    LOCAL fma TO LIST().   // fma[eg][st][fu]   Fuel mass in eg, by stage and fuel
-    LOCAL flt TO LIST().   // flt[eg][st][fu]   Fuel mass left in eg, by stage and fuel
-    LOCAL burn TO LIST().  // burn[[eg][st][fu] Burn time in eg, by stage and fuel
+    // 2-D lists
+    LOCAL conW TO LIST().   // con[eg][fu]   FD Fuel consuption in eg, by fuel
+    LOCAL conP TO LIST().   // con[eg][fu]   Possible FD Fuel consuption if fuel is available. Used to find if
+                            // fuel is holding back staging.
+    LOCAL thruVW TO LIST(). // thruV[eg][fu] FD Vac thrust in eg, by fuel
+    LOCAL thruAW TO LIST(). // thruA[eg][fu] FD Atmospheric thrust in eg, by fuel
+    LOCAL cfma TO LIST().   // cfma[eg][fu]   Fuel mass in eg, fu. Gets updated during substage calculation.
+    LOCAL fdfma TO LIST().  // fdfma[eg][fu]   Cumulative fuel mass in eg, fuel.
+    LOCAL fdnum TO LIST().  // Active number of fd sources that have fuel coming in (fdfma > 0).
+    LOCAL burnsrc TO LIST(). // When burn > 0 which eg does the fuel come from.
+    LOCAL burnsrcLF TO LIST(). // When burn > 0 which eg does the fuel come from.
+    LOCAL burndu TO LIST(). // Burn duration per eg, fu.
+    LOCAL donebu TO LIST(). // Has done/scheduled a burn per eg, fu.
 
     // 1. First the script loops over all engines to create engine groups (eg)
     LOCAL elist TO -999. LIST ENGINES IN elist.
@@ -238,9 +251,9 @@ FUNCTION stinfo {
         SET egli TO LIST(). // Collect engine group list
         SET egtali TO LIST(). // Holds all tanks and engines from engine group.
         SET egfdli TO LIST(). // Holds all fuel line parts from engine group.
-        SET egfddest TO LIST(). // Holds all fuel duct eg destinations from engine group.
 
         IF eTree(e,0) { // Find the engine group where this engine belongs to.
+            // collects values in egli, egtali, egfdli, egastage, egdstage.
             // Successfully returned
             IF dbg { mLog("Found eg: "+egidx). }
             eg:ADD(0).
@@ -248,9 +261,13 @@ FUNCTION stinfo {
             SET eg[egidx]["egli"] TO egli.
             SET eg[egidx]["egtali"] TO egtali.
             SET eg[egidx]["egfdli"] TO egfdli.
-            SET eg[egidx]["egfddest"] TO egfddest.
             SET eg[egidx]["egastage"] TO egastage.
             SET eg[egidx]["egdstage"] TO egdstage.
+
+            SET eg[egidx]["egfddest"] TO LIST(). // Holds all fuel duct eg destinations from engine group.
+            SET eg[egidx]["egfdsrc"] TO LIST(). // Holds the fd source egs for the engine group.
+            SET eg[egidx]["actfddest"] TO LIST(). // Holds all active fuel duct eg destinations from engine group.
+            SET eg[egidx]["actfdsrc"] TO LIST(). // Holds the active fd source egs for the engine group.
 
             SET egidx TO egidx+1.
         }
@@ -318,7 +335,7 @@ FUNCTION stinfo {
                 }
             }
         }
-        
+
         // Set regular mass to kst stage
         SET stmass[kst] TO stmass[kst] + pmass.
         // Log the part
@@ -334,20 +351,24 @@ FUNCTION stinfo {
         con:ADD(stZ:COPY).  // Consumption - Now con[eg][st]
         thruV:ADD(stZ:COPY). // Thrust vacuum
         thruA:ADD(stZ:COPY). // Thrust atmospheric pressure
-        fma:ADD(stZ:COPY).  // Fuel mass
-        flt:ADD(stZ:COPY).  // Fuel mass left
-        burn:ADD(stZ:COPY). // Burn time
         FROM {LOCAL s IS 0.} UNTIL s > STAGE:NUMBER STEP {SET s TO s+1.} DO {
             SET con[i][s] TO fuliZ:COPY.   // Now [eg][st][fu]
             SET thruV[i][s] TO fuliZ:COPY.  // Now [eg][st][fu]
             SET thruA[i][s] TO fuliZ:COPY.  // Now [eg][st][fu]
-            SET fma[i][s] TO fuliZ:COPY.   // Now [eg][st][fu]
-            SET flt[i][s] TO fuliZ:COPY.   // Now [eg][st][fu]
-            SET burn[i][s] TO fuliZ:COPY.  // Now [eg][st][fu]
         }
-
+        // Initialize 2-D lists for all eg:
+        conW:ADD(fuliZ:COPY).   // Consumption - Now con[eg][st]
+        conP:ADD(fuliZ:COPY).   // Consumption - Now con[eg][st]
+        thruVW:ADD(fuliZ:COPY). // Thrust vacuum
+        thruAW:ADD(fuliZ:COPY). // Thrust atmospheric pressure
+        cfma:ADD(fuliZ:COPY).    // Fuel mass
+        fdfma:ADD(fuliZ:COPY).   // Cumulative fuel mass in eg, fuel.
+        fdnum:ADD(fuliZ:COPY).  // Active number of fd sources that have fuel coming in (fdfma > 0).
+        burnsrc:ADD(fuliZ:COPY).  // When burn > 0 which eg does the fuel come from.
+        burnsrcLF:ADD(fuliZ:COPY).  // When burn > 0 which eg does the fuel come from.
+        burndu:ADD(fuliZ:COPY).  // Burn duration per eg, fu.
+        donebu:ADD(fuliZ:COPY).  // Has done/scheduled a burn per eg, fu.
         // Check where fuel ducts go.
-        // Note: This doesn't do anything yet.
         IF eg[i]:egfdli:LENGTH > 1 {
             PRINT " ".
             PRINT "The sinfo library supports only one fuel duct going out of a engine group!".
@@ -416,24 +437,50 @@ FUNCTION stinfo {
                 mLog("ignore fuel duct!").
             } ELSE {
                 eg[i]:egfddest:ADD(fddesteg). // Add to fuel duct eg destination list.
+                eg[fddesteg]:egfdsrc:ADD(i).          // Add to source list
                 SET fdtotal TO fdtotal + 1.
             }
             IF dbg { mLog("FD: eg "+i+" -> eg "+fddesteg+"/"+fulinetarget:TITLE+"/kOS tag: "+kTag). }
         }
     }
 
-    // Warn and abort if fuel ducts are used.
-    IF fdtotal > 0 {
-        PRINT " ".
-        PRINT "Fuel ducts are not yet supported.".
-        PRINT "Found: "+fdtotal+" active fuel ducts.".
-        PRINT "Aborting as the stage information would be incorrect.".
-        PRINT " ".
-        RETURN 0.
+    // 3a. Loop over engine groups - again.
+    // Create/show fd debug output.
+    IF dbg {
+        mLog(" ").
+        LOCAL fdstart TO LIST(). // List of eg that have no incoming fd.
+        LOCAL fdend TO LIST().   // List of eg that have no outgoing fd.
+        FROM {LOCAL i is 0.} UNTIL i > eg:LENGTH-1 STEP {set i to i+1.} DO {
+            IF eg[i]:egfddest:LENGTH > 0 {
+                LOCAL srcstr TO "".
+                IF eg[i]:egfdsrc:LENGTH = 0 {
+                    fdstart:ADD(i).
+                    SET srcstr TO "- ".
+                } ELSE {
+                    FOR ii IN eg[i]:egfdsrc {
+                        SET srcstr TO srcstr+ii+" ".
+                    }
+                }
+                mLog("FDs in eg "+i+": src: < "+srcstr+"> to dest: <"+eg[i]:egfddest[0]+">").
+            } ELSE IF eg[i]:egfdsrc:LENGTH > 0 { // No outgoing, but has incoming fd.
+                IF dbg { mLog("FD end eg: "+i). }
+                fdend:ADD(i).
+            }
+        }
+        LOCAL pstr TO " ".
+        FOR ii in fdstart {
+            SET pstr TO pstr+ii+" ".
+        }
+        mLog("fd start eg: "+pstr).
+        SET pstr TO " ".
+        FOR ii in fdend {
+            SET pstr TO pstr+ii+" ".
+        }
+        mLog("fd end eg: "+pstr).
     }
 
-
     // 4. Loop over engine groups - again
+    // Set consumption, thrust and fuel info per eg, s, fu.
     IF dbg {
         mLog(" ").
         mLog("eg,egast,egdst,parts,entas").
@@ -449,296 +496,629 @@ FUNCTION stinfo {
         // Store rocket engines only under OX and NERV under LF.
         FOR x in eg[i]:egtali {
             IF x:TYPENAME = "Engine" {
-                // conF, thruVF and thruAF hold consumption and thrust for the current engine. This makes
-                // the special RE and NERV treatment a little easier.
-                LOCAL conF TO fuliZ:COPY. // Storage for current engine for fuel consumption
-                LOCAL thruVF TO fuliZ:COPY. // Storage for current engine for thrust
-                LOCAL thruAF TO fuliZ:COPY. // Storage for current engine for thrust
-                // Use thrust in vacuum and at current position.
-                LOCAL pthrustvac IS x:POSSIBLETHRUSTAT(0). // Vacuum thrust. Includes thrust limit setting.
-                LOCAL pthrustcur IS x:POSSIBLETHRUST. // Current thrust. Includes thrust limit setting.
-                // Use parameter atmo to control atmospheric pressure used to calculate thrust.
-                IF atmo:ISTYPE("Scalar") {
-                    IF atmo < 0 {
-                        mLog(" ").
-                        mLog("Invalid argument: pressure "+ROUND(atmo,3)+" less than zero").
-                        mLog(" ").
-                        RETURN 0.
-                    }
-                    IF atmo > 100 {
-                        mLog(" ").
-                        mLog("Invalid argument: pressure "+ROUND(atmo,3)+" greater than 100 atm").
-                        mLog(" ").
-                        RETURN 0.
-                    }
-                    SET pthrustcur TO x:POSSIBLETHRUSTAT(atmo).
-                } ELSE {
-                    SET atmo TO "current pressure".
-                }
-                
-                LOCAL tlimit IS x:THRUSTLIMIT/100. // Needed to adjust res:MAXFUELFLOW
-                IF dbg { mLog("Engine: "+x:TITLE). }
-                FOR fkey IN x:CONSUMEDRESOURCES:KEYS { // fkey is language localized display name
-                    LOCAL cRes TO x:CONSUMEDRESOURCES[fkey]. // Consumed resource
-                    LOCAL fname TO cRes:NAME. // Workaround for bug. fname not localized (language)
-                    LOCAL fti TO fuli:FIND(fname).
-                    // Sanity check if our engine consumes something else than fuli
-                    IF fti >= 0 {
-                        // Set con[fti]
-                        SET conF[fti] TO cRes:MAXFUELFLOW*cRes:DENSITY*tlimit.
-                        SET thruVF[fti] TO pthrustvac.
-                        SET thruAF[fti] TO pthrustcur.
-                    } ELSE IF fname = "ElectricCharge" {
-                        // Has no mass - ignored
-                    } ELSE {
-                         // RCS thrusters are not engines, this cannot be triggered by momopropellant.
-                        IF dbg { mLog("Found unknown fuel "+fname+" - investigate!"). }
-                        PRINT 1/0.
-                    }
-                }
-                // Special treatment for REs.
-                IF conF[LFidx]*conF[OXidx] > 0 {
-                    // Rocket engine - remove LF thrust and consumption from REs.
-                    // LF consumption is included below with fuCorr[].
-                    SET conF[0] TO 0.
-                    SET thruVF[0] TO 0.
-                    SET thruAF[0] TO 0.
-                }
-                    
-                // Now add fuel to the applicable stages. This also adds the LF mass consumption for REs.
-                FROM {LOCAL s IS 0.} UNTIL s > STAGE:NUMBER STEP {SET s TO s+1.} DO {
-                    IF s <= x:STAGE AND s > x:DECOUPLEDIN {
-                        // Add values cumulatively.
-                        FROM {LOCAL x IS 0.} UNTIL x >= fuli:LENGTH STEP {SET x TO x+1.} DO {
-                            SET con[i][s][x] TO con[i][s][x] + conF[x].
-                            SET thruV[i][s][x] TO thruV[i][s][x] + thruVF[x].
-                            SET thruA[i][s][x] TO thruA[i][s][x] + thruAF[x].
-                            // Also add stage cumulative values.
-                            SET sticon[s] TO sticon[s] + conF[x]*fuCorr[x]. // Correct for OX use.
-                            SET stithruV[s] TO stithruV[s] + thruVF[x].
-                            SET stithruA[s] TO stithruA[s] + thruAF[x].
-                        }
-                    }
-                    // It is wrong to add zeroes (especially with fuliZ:COPY) as other engines in this eg
-                    // can have different x:STAGE or x:DECOUPLEDIN values. The xx[i][s][x] lists are initialized
-                    // to zero intitially.
-                }
+                // This adds to: con[i][s][f], thruV[i][s][f], thruA[i][s][f], sticon[s],
+                // stithruV[s] and stithruA[s]
+                setConThru(x, i).
             }
-            // Part with fuel (Tank or SRB)
+            // Part with fuel (Tank or SRB). Add the fuel to the eg.
             IF x:MASS > x:DRYMASS {
                 FOR r IN x:RESOURCES {
                     LOCAL fti TO fuli:FIND(r:NAME).
                     IF fti >= 0 {
-                        // Fuel in fma[] will be added to stfuel[] later.
-                        SET fma[i][eg[i]:egastage][fti] TO fma[i][eg[i]:egastage][fti] + r:AMOUNT*r:DENSITY.
+                        // Fuel in eg without stage dependency
+                        SET cfma[i][fti] TO cfma[i][fti] + r:AMOUNT*r:DENSITY.
                     } // Fuel not in fuli has been added to stmass[] already.
                 }
             }
         }
     }
+    // Log con, thru, ... info.
+    egLog().
 
+    // 5. Loop over stages and create substage information.
+    // The information is stored in sub[s][i]:XX with XX = bt, con, thruV and thruA
+    // Every substage enters: LEXICON("bt", 0, "con", 0, "thruV", 0, "thruA", 0)).
+    FROM {LOCAL s IS STAGE:NUMBER.} UNTIL s < 0 STEP {SET s TO s-1.} DO {
+        IF dbg {
+            mLog(" ").
+            mLog("s: "+s+"/"+STAGE:NUMBER+" New stage.").
+        }
+        LOCAL btstage TO 0. // Cumulative burn time for current stage.
+
+        // Initialize FD info
+        SET conW TO LIST(). // Is this needed?
+        SET conP TO LIST(). // Is this needed?
+        SET actfdstart TO LIST().
+        SET actfdend TO LIST().
+        FROM {LOCAL e is 0.} UNTIL e > eg:LENGTH-1 STEP {set e to e+1.} DO {
+            // Initialize 2-D lists for all eg:
+            conW:ADD(fuliZ:COPY).   // Is this needed?
+            conP:ADD(fuliZ:COPY).   // Is this needed?
+
+            SET eg[e]:actfdsrc TO LIST().
+            SET eg[e]:actfddest TO LIST().
+            // The eg don't need to be active (egastage) to be added.
+            IF s > eg[e]:egdstage {
+                FOR ee IN eg[e]:egfdsrc {
+                    IF s > eg[ee]:egdstage {
+                        eg[e]:actfdsrc:ADD(ee).
+                    }
+                }
+                FOR ee IN eg[e]:egfddest {
+                    IF s > eg[ee]:egdstage {
+                        eg[e]:actfddest:ADD(ee).
+                    }
+                }
+                IF eg[e]:actfddest:LENGTH = 0 { // No outgoing fd.
+                    IF eg[e]:actfdsrc:LENGTH > 0 {
+                        // Has incoming fd
+                        //mLog("actFD end eg: "+e).
+                        actfdend:ADD(e).
+                    } ELSE IF s <= eg[e]:egastage AND s > eg[e]:egdstage {
+                        // No incoming and no outgoing FD. Add to actfdend and actfdstart if stage is on.
+                        //mLog("actFD end eg: "+e).
+                        actfdend:ADD(e).
+                        //mLog("actFD start eg: "+e).
+                        actfdstart:ADD(e).
+                    }
+                }
+                // No incoming, but outgoing FD
+                IF eg[e]:actfdsrc:LENGTH = 0 AND eg[e]:actfddest:LENGTH > 0 {
+                    //mLog("actFD start eg: "+e).
+                    actfdstart:ADD(e).
+                }
+                // The case for no incoming and no outgoing FD is handled above.
+            }
+        }
+
+        IF dbg {
+            LOCAL sstr TO "actfdstart:".
+            FOR i IN actfdstart { SET sstr TO sstr +" "+i. }
+            mLog(sstr).
+            SET sstr TO "actfdend:  ".
+            FOR i IN actfdend { SET sstr TO sstr +" "+i. }
+            mLog(sstr).
+        }
+
+        // Preparations - This is repeated inside the UNTIL loop.
+        FOR i IN actfdend {
+            // Set fdfma[e][f] as the cumulative fuel coming into an eg.
+            // Needed for setConThruFD().
+            setFDfma(i).
+            // Set fd con and thru.
+            setConThruFD(i,s).
+        }
+        IF dbg { mLog("Before UNTIL loop:"). }
+        egCoFuLog(s).
+
+
+        LOCAL dsloop TO 0.
+
+        // Check if we can stage - repeat at end of UNTIL loop
+        LOCAL dostage TO False.
+        LOCAL hasdropeg TO False.
+        LOCAL nofuel TO True.
+        LOCAL acteg TO 0.
+        LOCAL dropeg TO "".
+        FROM {LOCAL e is 0.} UNTIL e > eg:LENGTH-1 STEP {set e to e+1.} DO {
+            // Assume we can stage
+            IF s <= eg[e]:egastage { SET acteg TO acteg+1. }
+            IF s = eg[e]:egdstage+1 {
+                // Make sure there are stages to drop, e.g. with s = eg[e]:egdstage+1.
+                SET hasdropeg TO True.
+                SET dropeg TO dropeg+" "+e.
+                // Unless there is fuel left in a stage we can stage.
+                LOCAL tfuel TO 0.
+                // Check for fuel and consumption
+                FROM {LOCAL f is 0.} UNTIL f > fuli:LENGTH-1 STEP {set f to f+1.} DO {
+                    IF conP[e][f] > 0 {
+                        SET tfuel TO tfuel + cfma[e][f].
+                        // For RE LF & OX prohibit staging
+                        IF f = OXidx { SET tfuel TO tfuel + cfma[e][LFidx]. }
+                    }
+                }
+                IF tfuel > 1e-7 {
+                    SET nofuel TO False.
+                    //IF dbg { mLog("Cannot stage yet"). }
+                }
+            }
+        }
+        // We need to stage if no eg is active.
+        IF acteg < 1 {
+            SET dostage TO True.
+            IF dbg OR 1 { mLog("s: "+s+" No stages active - stage!"). }
+        } ELSE IF nofuel AND hasdropeg {
+            SET dostage TO True.
+            IF dbg OR 1 { mLog("s: "+s+" All stages empty - stage: "+dropeg). }
+        }
+        IF dbg AND dostage { mLog("We can stage / skip UNTIL loop."). }
+
+        // Loop inside stage to determine burn intervals.
+        UNTIL dostage = True {
+            SET dsloop TO dsloop + 1.
+            IF dbg {
+                mLog(" ").
+                mLog("s: "+s+" UNTIL loop: "+dsloop).
+                egFuLog(s).
+            }
+
+            // Initialize some variables.
+            FROM {LOCAL e is 0.} UNTIL e > eg:LENGTH-1 STEP {set e to e+1.} DO {
+                // Initialize back to zero:
+                SET burndu[e] TO fuliZ:COPY.  // Set durations back to zero.
+                SET donebu[e] TO fuliZ:COPY.  // Set done/scheduled back to zero.
+            }
+
+            IF dbg {
+                LOCAL sstr TO "actfdstart:".
+                FOR i IN actfdstart { SET sstr TO sstr +" "+i. }
+                mLog(sstr).
+                SET sstr TO "actfdend:  ".
+                FOR i IN actfdend { SET sstr TO sstr +" "+i. }
+                mLog(sstr).
+                mLog(" ").
+            }
+
+            // Loop over actfdstart and find burn durations.
+            LOCAL minburn TO 1e12. // One terasecond
+            FOR e IN actfdstart { // There can be more than one entry.
+                //mLog("actfdstart e:"+e+" conW_OX: "+conW[e][OXidx]).
+                // calculate burn durations.
+
+                LOCAL bustr TO "".
+                LOCAL bsrcstr TO "".
+                FROM {LOCAL f is 0.} UNTIL f > fuli:LENGTH-1 STEP {set f to f+1.} DO {
+                    // Note: burn for LF is wrong when RE is present. Fixed below.
+                    LOCAL burnV TO CHOOSE 0 IF conW[e][f] = 0 ELSE cfma[e][f] / conW[e][f].
+                    // Make sure REs have all fuel.
+                    IF f = OXidx {
+                        // Make sure we have LF
+                        LOCAL burnLF TO CHOOSE 0 IF conW[e][f] = 0 ELSE cfma[e][LFidx] / (conW[e][f]*ox2lf).
+                        SET burnV TO MIN(burnV,burnLF).
+                        SET burnsrcLF[e][OXidx] TO e.
+                        SET burnsrcLF[e][LFidx] TO e.
+                    }
+                    SET burndu[e][f] TO burnV.
+                    SET burnsrc[e][f] TO e.
+                    LOCAL edstr TO "".
+                    // Find alternative fuel
+                    // Loop over all and keep/reset the lowest fdl (all fdl=0)
+                    LOCAL ee TO e.
+                    IF burnV < 0.01 { // Shorter than a physics tick
+                        LOCAL stoploop TO False.
+                        LOCAL ed TO -1.
+                        UNTIL stoploop = True {
+                            IF eg[ee]:actfddest:LENGTH > 0 {
+                                SET ed TO eg[ee]:actfddest[0].
+                                SET edstr TO edstr+"->"+ed.
+                                IF fdnum[ed][f] > 0 {
+                                    // Our current fd path doesn't have fuel, but other paths into ed have
+                                    // fuel. Do not pursue this path.
+                                    IF dbg {
+                                        mLog("  FD path with fuel exists - ignore "+e+edstr+" for f: "+f).
+                                    }
+                                    SET burnsrc[e][f] TO -1. // Not used.
+                                    BREAK.
+                                }
+                                IF donebu[ed][f] {
+                                    // If there is more than 1 fd path to this eg and all have used up their
+                                    // fuel, but are not staged this condition can trigger.
+                                    // We ignore it if it has been reached before.
+                                    IF dbg {
+                                        mLog("  Has been reached by other path - ignore "+e+edstr+" for f: "+f).
+                                    }
+                                    SET burnsrc[e][f] TO -1. // Done already.
+                                    BREAK.
+                                }
+                                // Can we burn fuel in this stage?
+                                IF conW[ed][f] > 0 {
+                                    // At this point we have to distinguish if we can only burn the fuel in
+                                    // this stage, or if FD are feeding it. This can only happen for RE.
+                                    IF f = OXidx {
+                                        IF  fdfma[ed][f] > 0 AND fdfma[ed][LFidx] > 0 {
+                                            // If we are here this stage can burn RE
+                                            // We assume the tank the farthest away gets drained first.
+                                            // See google doc - not necessarily always true.
+                                            // If multiple tanks are there on the same level we burn them
+                                            // sequentially. In this case it is equivalent as the consumption
+                                            // normally would be split between the tanks, but in this case the
+                                            // full consumption is used on one tank after the other. The burn
+                                            // duration is the same, and the mass flow also.
+                                            LOCAL LFsrc TO ed.
+                                            LOCAL OXsrc TO ed.
+                                            // IF fdfma > cfma it means we have individual (not both LF and
+                                            // OX) pockets of fuel. In that case we need to find those
+                                            // recursively.
+                                            IF fdfma[ed][f] > cfma[ed][f] OR fdfma[ed][LFidx] > cfma[ed][LFidx] {
+                                                IF dbg {
+                                                    mLog("Found LF or OX in earlier engine group. Find sources for eg "+e+" -> "+ed).
+                                                }
+                                                LOCAL rval TO getREsrc(ed). // Find the fuel the farthest away.
+                                                SET LFsrc TO rval[0].
+                                                SET OXsrc TO rval[1].
+                                            } // Otherwise we use the local fuel.
+                                            LOCAL burnOX TO cfma[OXsrc][OXidx] / conW[ed][OXidx].
+                                            LOCAL burnLF TO cfma[LFsrc][LFidx] / (conW[ed][OXidx]*ox2lf).
+                                            IF dbg {
+                                                mLog("   LF/OX src-eg: "+LFsrc+"/"+OXsrc+" fuel: "
+                                                +ROUND(cfma[LFsrc][LFidx],3)+"/"+ROUND(cfma[OXsrc][OXidx],3)
+                                                +" burn: "+ROUND(burnLF,2)+"/"+ROUND(burnOX,2)).
+                                            }
+
+                                            SET stoploop TO True.
+                                            SET burndu[e][f] TO MIN(burnOX,burnLF).
+                                            SET burnsrc[e][f] TO ed.
+                                            SET burnsrcLF[e][OXidx] TO OXsrc.
+                                            SET burnsrcLF[e][LFidx] TO LFsrc.
+                                            SET donebu[ed][f] TO 1.
+
+                                            IF burndu[e][f] = 0 {
+                                                mLog("Investigate!").
+                                                PRINT 1/0.
+                                            }
+                                        }
+                                    } ELSE {
+                                        // Only local fuel
+                                        SET burnV TO CHOOSE 0 IF conW[ed][f] = 0 ELSE cfma[ed][f] / conW[ed][f].
+                                        IF burnV > 0 {
+                                            SET stoploop TO True.
+                                            SET burndu[e][f] TO burnV.
+                                            SET burnsrc[e][f] TO ed.
+                                            // The next two are only needed for OXidx
+                                            SET burnsrcLF[e][OXidx] TO -1.
+                                            SET burnsrcLF[e][LFidx] TO -1.
+                                            SET donebu[ed][f] TO 1.
+                                        }
+                                    }
+                                }
+                                SET ee TO ed.
+                            } ELSE {
+                                // Nothing to follow - stop now.
+                                SET stoploop TO True.
+                                SET burnsrc[e][f] TO -1. // Found no fuel.
+                            }
+                        }
+                    } ELSE {
+                        // Mark this eg had a burn.
+                        SET donebu[e][f] TO 1.
+                    }
+                    IF burnV > 0 AND dbg {
+                        mLog(" Burn: "+ROUND(burnV,4)+" for "+e+edstr+" for f: "+f).
+                    }
+                    IF dbg {
+                        SET bustr TO bustr+","+nuform(burndu[e][f],4,1).
+                        SET bsrcstr TO bsrcstr+","+nuform(burnsrc[e][f],2,0).
+                    }
+                }
+                IF dbg { mLog("eg,"+e+",bt"+bustr+",src"+bsrcstr). }
+
+                // Correct for RE vs. NERV fuel and oxidizer usage
+                // This works for engine groups without fuel ducts. Can I break it with fuel ducts?
+                // Testcases "SI kOS test III-nerv fl" and "SI kOS test IIIa-nerv fl" work.
+                IF conW[e][LFidx] > 0 AND conW[e][OXidx] > 0 { // Only when RE and NERV are active.
+                    LOCAL LFXcon TO conW[e][LFidx] + conW[e][OXidx]*ox2lf.
+                    // Combined NERV and RE LF based burn.
+                    LOCAL LFXburn TO CHOOSE 0 IF LFXcon = 0 ELSE cfma[e][LFidx]/LFXcon.
+                    LOCAL OXburn TO burndu[e][OXidx]. // Recalulated below
+                    LOCAL LFburn TO burndu[e][LFidx]. // Recalulated below - certainly wrong when RE present
+                    IF dbg { mLog("  NERV+RE LF burn: "+ROUND(LFXburn,1)
+                            +" Corrected:"). }
+                    IF LFXburn < OXburn {
+                        // Shorten OXburn
+                        SET OXburn TO LFXburn. // Less LF than OX for RE (OX leftover)
+                        SET burndu[e][OXidx] TO OXburn.
+                    }
+                    // No need to treat the case of OXburn < LFXburn. The Nerv burn is recalculated based
+                    // on the OXburn anyway.
+                    // If a NERV is present, no leftover. Otherwise this case covers for RE with less
+                    // OX than LF. This leads to LF leftover and a LFburn of 0s.
+                    // Recalculate LFburn, with RE in mind
+                    SET LFburn TO CHOOSE 0 IF conW[e][LFidx] = 0 ELSE
+                        (cfma[e][LFidx] - OXburn*conW[e][OXidx]*ox2lf) / conW[e][LFidx]. // No leftover
+                    SET burndu[e][LFidx] TO LFburn.
+                    IF dbg {
+                        SET bustr TO "".
+                        FROM {LOCAL f is 0.} UNTIL f > fuli:LENGTH-1 STEP {set f to f+1.} DO {
+                            SET bustr TO bustr+","+nuform(burndu[e][f],4,1).
+                        }
+                        mLog("eg,"+e+",bt"+bustr).
+                    }
+                }
+            }
+
+            FOR e IN actfdstart {
+                // Find minimum value
+                FROM {local f is 0.} UNTIL f > fuli:LENGTH-1 STEP {set f to f+1.} DO {
+                    IF burndu[e][f] > 0 AND burndu[e][f] < minburn { SET minburn TO burndu[e][f]. }
+                }
+            }
+
+            // SRBs don't follow fuel lines.
+            // Note: Another issue is that SRBs don't share fuel in eg. This will fail if different
+            // consumption and/or fuelmass SRBs are joined in one eg.
+            FROM {local e is 0.} UNTIL e > eg:LENGTH-1 STEP {set e to e+1.} DO {
+                // SRBs can be firing in all active eg. As we don't follow fd, like for all other engine
+                // types, just check SRBs in all eg that are not in actfdstart. Check first for SRB fuel
+                // to shortcut the conditions as fast as possible.
+                IF cfma[e][SOidx] > 0 AND NOT(actfdstart:CONTAINS(e)) AND s <= eg[e]:egastage
+                   AND s > eg[e]:egdstage AND  conW[e][SOidx] > 0 {
+                    // Check for conW[e][SOidx] as an engine can be inactive even when the eg is active.
+                    LOCAL burnV TO cfma[e][SOidx] / conW[e][SOidx]. // Is larger than 0.
+                    IF burnV < minburn { SET minburn TO burnV. }
+                    IF dbg {
+                        mLog("Found another active SRB in eg "+e+" with burntime "+burnV).
+                    }
+                }
+            }
+
+            SET minburn TO CHOOSE 0 IF minburn = 1e12 ELSE minburn.
+            SET btstage TO btstage+minburn.
+            IF dbg OR 1 {
+                mLog("s: "+s+" Minimum burn: "+ROUND(minburn,2)).
+            }
+
+            IF minburn = 0 {
+                IF dbg OR 1 { mLog("   No burn? Stage! Discard leftover LF fuel."). }
+                SET dostage TO True.
+            } ELSE {
+                // Consume the fuel for minburn.
+                LOCAL fuma TO 0. // Fuel consumed
+                LOCAL conS TO 0. // Substage consumption
+                LOCAL thruVS TO 0. // Substage vacuum thrust
+                LOCAL thruAS TO 0. // Substage atmospheric thrust
+                
+                // Initialize substage and add burn time.
+                sub[s]:ADD(LEXICON("bt", minburn, "con", 0, "thruV", 0, "thruA", 0)).
+                
+                IF dbg {
+                    mLog(" ").
+                    mLog("Consume fuel.").
+                }
+                FOR e IN actfdstart { // There can be more than one entry.
+                    FROM {LOCAL f is 0.} UNTIL f > fuli:LENGTH-1 STEP {set f to f+1.} DO {
+                        IF f <> SOidx AND burndu[e][f] > 0 { // Treat SRBs below, only real burns.
+                            LOCAL fucon TO 0.
+                            LOCAL fuconLF TO 0.
+
+                            LOCAL bs TO burnsrc[e][f].
+
+                            SET fucon TO conW[bs][f]*minburn.
+                            SET conS TO conS + conW[bs][f]. // Careful with the bs change below.
+                            SET thruVS TO thruVS + thruVW[bs][f].
+                            SET thruAS TO thruAS + thruAW[bs][f].
+                            
+                            // RE can be annoying!
+                            IF f = OXidx AND conW[bs][f] > 0 { // Include LF from REs
+                                LOCAL bsLF TO burnsrcLF[e][LFidx].
+                                SET fuconLF TO conW[bs][f]*ox2lf*minburn.
+                                SET conS TO conS + conW[bs][f]*ox2lf.
+                                SET cfma[bsLF][LFidx] TO cfma[bsLF][LFidx] - fuconLF.
+                                IF ABS(cfma[bsLF][LFidx]) < fuMin {
+                                    SET cfma[bsLF][LFidx] TO 0. // Remove rounding errors.
+                                }
+                                SET fuma TO fuma + fuconLF.
+                                IF dbg { mLog(e+",RE LF con: "+ROUND(fuconLF,4)). }
+                                // Overwrite bs with OX source eg.
+                                SET bs to burnsrcLF[e][OXidx].
+                            }
+                            SET cfma[bs][f] TO cfma[bs][f] - fucon.
+                            IF dbg { mLog(e+","+fuli[f]:SUBSTRING(0,2)+" con:    "+ROUND(fucon,4)). }
+                            IF ABS(cfma[bs][f]) < fuMin {
+                                SET cfma[bs][f] TO 0. // Remove rounding errors.
+                            }
+                            IF cfma[bs][f] < 0 {
+                                mLog("Fuel: "+ROUND(cfma[bs][f],4)+" in eg,bs,ft: "+e+","+bs+","+f).
+                                PRINT 1/0.
+                            }
+                            SET fuma TO fuma + fucon.
+                        }
+                    }
+                }
+                // SRBs don't follow fuel lines - see comment above.
+                FROM {local e is 0.} UNTIL e > eg:LENGTH-1 STEP {set e to e+1.} DO {
+                    // Check first for SRB fuel to shortcut the conditions as fast as possible.
+                    IF cfma[e][SOidx] > 0 AND s <= eg[e]:egastage AND s > eg[e]:egdstage  {
+                        LOCAL fucon TO conW[e][SOidx]*minburn.
+                        SET conS TO conS + conW[e][SOidx].
+                        SET thruVS TO thruVS + thruVW[e][SOidx].
+                        SET thruAS TO thruAS + thruAW[e][SOidx].
+                        IF fucon > cfma[e][SOidx] {
+                            // This shouldn't happen. We missed a shorter minimum burn from the SRB.
+                            mLog("Missed a shorter SRB minimum burn! Abort!").
+                            PRINT 1/0.
+                        }
+                        IF dbg { mLog(e+": SO con: "+ROUND(fucon,3)). }
+
+                        SET cfma[e][SOidx] TO cfma[e][SOidx] - fucon.
+                        SET fuma TO fuma + fucon.
+                        IF ABS(cfma[e][SOidx]) < fuMin {
+                            SET cfma[e][SOidx] TO 0. // Remove rounding errors.
+                        }
+                        IF dbg { mLog(e+" SRB: "+nuform(fucon,3,2)). }
+                    }
+                }
+
+                IF dbg {
+                    mLog("Total fuel consumed: "+ROUND(fuma,4)
+                        +"  rate: "+ROUND(conS,6)+" ("+ROUND(fuma/minburn,6)+") thrust: "+ROUND(thruVS,3)+" / "+ROUND(thruAS,3)).
+                    egFuLog(s).
+                    mLog(" ").
+                }
+                SET stfuel[s] TO stfuel[s] + fuma.
+                LOCAL sidx TO sub[s]:LENGTH-1.
+                SET sub[s][sidx]:con TO conS.
+                SET sub[s][sidx]:thruV TO thruVS.
+                SET sub[s][sidx]:thruA TO thruAS.
+            }
+            
+            // Collect leftover fuel that would get dropped and check if we can stage
+            LOCAL nofuel TO True.
+            LOCAL hasdropeg TO False.
+            LOCAL fuleft TO 0. // Fuel left after burn.
+            FROM {LOCAL e is 0.} UNTIL e > eg:LENGTH-1 STEP {set e to e+1.} DO {
+                // Assume we can stage, until shown otherwise.
+                IF s = eg[e]:egdstage+1 {
+                    // Make sure there are stages to drop, e.g. with s = eg[e]:egdstage+1.
+                    SET hasdropeg TO True.
+                    SET dropeg TO dropeg+" "+e.
+                    // Unless there is fuel left in a stage we can stage.
+                    LOCAL tfuel TO 0.
+                    // Check for fuel and consumption
+                    FROM {LOCAL f is 0.} UNTIL f > fuli:LENGTH-1 STEP {set f to f+1.} DO {
+                        IF conP[e][f] > 0 {
+                            SET tfuel TO tfuel + cfma[e][f].
+                            // For RE LF & OX prohibit staging. But avoid double counting LF,
+                            IF f = OXidx AND conP[e][LFidx] = 0 { SET tfuel TO tfuel + cfma[e][LFidx]. }
+                        }
+                        // Collect all fuel left.
+                        SET fuleft TO fuleft + cfma[e][f].
+                    }
+                    IF tfuel > 1e-7 {
+                        SET nofuel TO False.
+                        IF dbg {
+                            mLog("Cannot stage yet. e:"+e+" fuel: "+ROUND(tfuel,3)).
+                            mLog(" ").
+                        }
+                        // Loop over all dropped eg - don't break.
+                        //BREAK.
+                    }
+                }
+            }
+            IF nofuel AND hasdropeg { SET dostage TO True. }
+
+            IF dbg { mLog("OK to stage - "+dostage). }
+
+            IF dostage {
+                SET stburn[s] TO btstage.
+                SET stleft[s] TO fuleft.
+                IF dbg OR 1 {
+                    mLog("s: "+s+" Burntime: "+ROUND(btstage,2)
+                        +" burned: "+ROUND(stfuel[s],3)+" left: "+ROUND(stleft[s],3)).
+                }
+            } ELSE {
+                // Perform setFDfma(e), setConThruFD(e,s) calculation if we are not staging.
+                // This is done before the UNTIL loop and needs to be repeated after fuel consumption.
+                FOR e IN actfdend { // There can be more than one entry in actfdend.
+                    // Set fdfma[e][f] as the cumulative fuel coming into an eg.
+                    // Needed for setConThruFD().
+                    setFDfma(e).
+                    // Set fd con and thru.
+                    setConThruFD(e,s).
+                }
+                egCoFuLog(s).
+            }
+        }
+    }
+
+    // Needs to move to the end
+    // Finds source eg for OXsrc and LFsrc
+    FUNCTION getREsrc {
+        PARAMETER e.    // Engine group
+
+        LOCAL LFre TO CHOOSE e IF cfma[e][LFidx] > 0 ELSE -1.
+        LOCAL OXre TO CHOOSE e IF cfma[e][OXidx] > 0 ELSE -1.
+
+        FOR es IN eg[e]:actfdsrc {
+            //mLog("Call e: "+e+" -> es: "+es).
+            LOCAL rval TO getREsrc(es).
+            IF rval[0] >= 0 AND cfma[rval[0]][LFidx] > fuMin {
+                SET LFre TO rval[0].
+                //mLog("LF es: "+es+" ret: "+LFre).
+            }
+            IF rval[1] >= 0 AND cfma[rval[1]][OXidx] > fuMin {
+                SET OXre TO rval[1].
+                //mLog("OX es: "+es+" ret: "+OXre).
+            }
+        }
+        RETURN LIST(LFre,OXre).
+    }
+
+    // Needs to move to the end
+    // Calculates how much fuel is available in eg including incoming fuel ducts.
+    FUNCTION setFDfma {
+        PARAMETER e.    // Engine group
+
+        FROM {LOCAL f is 0.} UNTIL f > fuli:LENGTH-1 STEP {set f to f+1.} DO {
+            SET fdfma[e][f] TO cfma[e][f].
+        }
+        FOR es IN eg[e]:actfdsrc {
+            setFDfma(es).
+            FROM {LOCAL f is 0.} UNTIL f > fuli:LENGTH-1 STEP {set f to f+1.} DO {
+                // Solid fuel doesn't flow through fuel ducts.
+                IF f <> SOidx {
+                    SET fdfma[e][f] TO fdfma[e][f] + fdfma[es][f].
+                }
+            }
+        }
+        RETURN 1.
+    }
+
+    // Needs to move to the end
+    // Calculates consumption and thrust based on locally available fuel and downstream fd connections.
+    FUNCTION setConThruFD {
+        PARAMETER e,    // Engine group
+                  s.    // Stage
+
+        FROM {LOCAL f is 0.} UNTIL f > fuli:LENGTH-1 STEP {set f to f+1.} DO {
+            SET conP[e][f] TO con[e][s][f]. // Potential consumption
+            // Use fdfma instead of cfma. This loop works end to source.
+            IF fdfma[e][f] > 0 AND ( f <> OXidx OR fdfma[e][LFidx] > 0 ) {
+                // RE needs both
+                SET conW[e][f] TO con[e][s][f].
+                SET thruVW[e][f] TO thruV[e][s][f].
+                SET thruAW[e][f] TO thruA[e][s][f].
+            } ELSE {
+                SET conW[e][f] TO 0.
+                SET thruVW[e][f] TO 0.
+                SET thruAW[e][f] TO 0.
+            }
+        }
+
+        // Find active sources per fuel for current eg.
+        // Loop over eg that feed into this one. If there is (cumulative) fuel increase the "feeder" count.
+        SET fdnum[e] TO fuliZ:COPY.
+        FOR es IN eg[e]:actfdsrc {
+            FROM {LOCAL f is 0.} UNTIL f > fuli:LENGTH-1 STEP {set f to f+1.} DO {
+                IF fdfma[es][f] > 0 {
+                    IF f = OXidx AND fdfma[es][LFidx] = 0 {
+                        // RE need both, so don't set conW
+                    } ELSE {
+                        SET fdnum[e][f] TO fdnum[e][f]+1.
+                    }
+                }
+            }
+        }
+        // This uses fdnum from downstream eg.
+        // Calculate consumption for the current eg, including the consuption of all downstream eg that have
+        // fuel feeding into them. We only can use the con if we have fuel ourselves.
+        FOR ed IN eg[e]:actfddest { // Can be 0 or 1 entries.
+            FROM {LOCAL f is 0.} UNTIL f > fuli:LENGTH-1 STEP {set f to f+1.} DO {
+                // Solid fuel doesn't flow through fuel ducts.
+                IF f <> SOidx AND fdnum[ed][f] > 0 AND fdfma[e][f] > 0 {
+                    IF f <> OXidx OR fdfma[e][LFidx] > 0 {
+                        // RE need both, so don't set conW otherwise.
+                        SET conW[e][f] TO conW[e][f] + conW[ed][f] / fdnum[ed][f].
+                        SET thruVW[e][f] TO thruVW[e][f] + thruVW[ed][f] / fdnum[ed][f].
+                        SET thruAW[e][f] TO thruAW[e][f] + thruAW[ed][f] / fdnum[ed][f].
+                    }
+                }
+                // This indicates if there is a consumer for the fuel type. The value of conP is
+                // not meaningfull. Zero means nothing, otherwise there is consumption.
+                SET conP[e][f] TO conP[e][f] + conP[ed][f].
+            }
+        }
+        // Recursion.
+        FOR ee IN eg[e]:actfdsrc {
+            setConThruFD(ee,s).
+        }
+
+        RETURN 1.
+    }
 
     // Print/Log consumption, thrust and mass info for all egs, s and f
     egLog().
 
-    // 5. Calculate burn durations for engine groups, for all fuels.
-    // Loop over stage, loop over eg, check if eg has consumption at stage.
-    // Calc burn duration for each fuel type, find maximum burn time for the
-    // engine group.
-    // If all active eg in the current stage, with a decoupler in the next stage,
-    // run out of fuel "stage" and move the remaining fuel in any active eg to
-    // the next stage. (unburned fuel to next stage.) 
-    FROM {LOCAL s IS STAGE:NUMBER.} UNTIL s < 0 STEP {SET s TO s-1.} DO {
-        LOCAL maxBDecEg TO 0. // Max burn decoupled eg
-        LOCAL maxBRemEg TO 0. // Max burn remaining eg
-        LOCAL egBurn TO LIST(). // Burn duration for eg
-        IF dbg {
-            mLog(" ").
-            mLog("St "+s+" eg burn info:").
-            LOCAL sstring TO "S".
-            FROM {LOCAL f is 0.} UNTIL f > fuli:LENGTH-1 STEP {set f to f+1.} DO {
-                SET sstring TO sstring+","+fuli[f].
-            }
-            mLog(sstring).
-        }
-        // Find burn durations for eg
-        FROM {LOCAL e is 0.} UNTIL e > eg:LENGTH-1 STEP {set e to e+1.} DO {
-            // First calculate burn time per eg and fuel type at this stage.
-            IF s <= eg[e]:egastage AND s > eg[e]:egdstage { // Only consider active egs
-                LOCAL BurnV TO 0.
-                LOCAL sburn TO "".
-                FROM {LOCAL f is 0.} UNTIL f > fuli:LENGTH-1 STEP {set f to f+1.} DO {
-                    // BurnV for LF is wrong when RE is present. Fixed below.
-                    SET BurnV TO CHOOSE 0 IF con[e][s][f] = 0 ELSE fma[e][s][f] / con[e][s][f].
-                    SET burn[e][s][f] TO BurnV.
-                    IF dbg { SET sburn TO sburn + ","+nuform(burn[e][s][f],3,2). }
-                }
-                IF dbg { mLog(e+sburn). }
-            }
-        }
-        // Correct for RE vs. NERV fuel and oxidizer usage
-        FROM {LOCAL e is 0.} UNTIL e > eg:LENGTH-1 STEP {set e to e+1.} DO {
-            // Now correct the burn times for RE and NERV.
-            LOCAL mBurnV TO 0.
-            IF s <= eg[e]:egastage AND s > eg[e]:egdstage {
-                LOCAL LFXcon TO con[e][s][LFidx] + con[e][s][OXidx]*ox2lf.
-                // Combined NERV and RE LF based burn.
-                LOCAL LFXburn TO CHOOSE 0 IF LFXcon = 0 ELSE fma[e][s][LFidx]/LFXcon.
-                LOCAL OXburn TO burn[e][s][OXidx]. // Recalulated below
-                LOCAL LFburn TO burn[e][s][LFidx]. // Recalulated below - certainly wrong when RE present
-                IF dbg { mLog("eg:"+e+", burn bef. corr: LFX: "+ROUND(LFXburn,1)+" LF: "+ROUND(LFburn,1)+" OX: "+ROUND(OXburn,1)). }
-                IF LFXburn < OXburn {
-                    // Shorten OXburn
-                    SET OXburn TO LFXburn. // Less LF than OX for RE (OX leftover)
-                    SET burn[e][s][OXidx] TO OXburn.
-                }
-                // No need to treat the case of OXburn < LFXburn. The Nerv burn is recalculated based
-                // on the OXburn anyway.
-                // If a NERV is present, no leftover. Otherwise this case covers for RE with less
-                // OX than LF. This leads to LF leftover and a LFburn of 0s.
-                // Recalculate LFburn, with RE in mind
-                SET LFburn TO CHOOSE 0 IF con[e][s][LFidx] = 0 ELSE
-                    (fma[e][s][LFidx] - OXburn*con[e][s][OXidx]*ox2lf) / con[e][s][LFidx]. // No leftover
-                SET burn[e][s][LFidx] TO LFburn.
-                IF dbg { mLog("eg:"+e+", burn aft. corr: LFX: "+ROUND(LFXburn,1)+" LF: "+ROUND(LFburn,1)+" OX: "+ROUND(OXburn,1)). }
-                
-                // Find maximum values
-                FROM {local f is 0.} UNTIL f > fuli:LENGTH-1 STEP {set f to f+1.} DO {
-                    IF burn[e][s][f] > mBurnV { SET mBurnV TO burn[e][s][f]. }
-                }
-                // Max burn for decoupled stage and remaining stages
-                IF eg[e]:egdstage+1 = s {
-                    //IF dbg { mLog(s+","+e+" Gets decoupled."). }
-                    SET maxBDecEg TO MAX(maxBDecEg,mBurnV).
-                } ELSE {
-                    //IF dbg { mLog(s+","+e+" Move fuel."). }
-                    SET maxBRemEg TO MAX(maxBRemEg,mBurnV).
-                }
-            }
-            egBurn:ADD(mBurnV).
-        }
-        // Maximum burn time of stages with decoupler.
-        SET stburn[s] TO maxBDecEg.
-        // If nothing decouples, use maximum burn time.
-        IF stburn[s] = 0 { SET stburn[s] TO maxBRemEg. }
-
-        // Adjust eg burn time, fuel and unused fuel.
-        FROM {LOCAL e is 0.} UNTIL e > eg:LENGTH-1 STEP {set e to e+1.} DO {
-            // Now check how much fuel gets transfered.
-            IF s <= eg[e]:egastage AND s > eg[e]:egdstage {
-                IF eg[e]:egdstage+1 = s {
-                    // This eg gets decoupled (or is the last one). Check for leftover fuel - gets dropped.
-                    IF dbg { mLog("Gets decoupled - eg: "+e+" burn: "+ROUND(egBurn[e],2)+" s."). }
-                    FROM {LOCAL f is 0.} UNTIL f > fuli:LENGTH-1 STEP {SET f to f+1.} DO {
-                        LOCAL FuBurned TO burn[e][s][f] * con[e][s][f].
-                        IF f = LFidx { // Inlude LF from REs
-                            SET FuBurned TO FuBurned + burn[e][s][OXidx]*con[e][s][OXidx]*ox2lf.
-                        }
-                        SET flt[e][s][f] TO fma[e][s][f] - FuBurned.
-                        SET fma[e][s][f] TO FuBurned.
-                        // Leftover fuel gets dropped with the stage.
-                        SET stleft[s] TO stleft[s] + flt[e][s][f].
-                    }
-                } ELSE {
-                    // This eg remains. Adjust the burn duration, check for leftover fuel and move it to
-                    // the next stage.
-                    IF dbg { mLog("Stays - eg: "+e+" burn: "+ROUND(egBurn[e],2)
-                            +" move "+ROUND(egBurn[e] - maxBDecEg,2)+" s fuel."). }
-                    FROM {LOCAL f is 0.} UNTIL f > fuli:LENGTH-1 STEP {SET f to f+1.} DO {
-                        // Adjust burn duration for fueg
-                        IF burn[e][s][f] > maxBDecEg {
-                            SET burn[e][s][f] TO maxBDecEg.
-                        }
-                        LOCAL burnDur TO burn[e][s][f].
-                        LOCAL FuBurned TO burnDur * con[e][s][f].
-                        IF f = LFidx { // Inlude LF from REs
-                            LOCAL burnDurOX TO MIN(stburn[s], burn[e][s][OXidx]).
-                            SET FuBurned TO FuBurned + burnDurOX*con[e][s][OXidx]*ox2lf.
-                        }
-                        // Leftover fuel gets moved to the next stage.
-                        SET fma[e][s-1][f] TO fma[e][s][f] - FuBurned.
-                        SET fma[e][s][f] TO FuBurned.
-                    }
-                }
-
-                // Sum up fuel - burned in active stages.
-                FROM {LOCAL f is 0.} UNTIL f > fuli:LENGTH-1 STEP {SET f to f+1.} DO {
-                    SET stfuel[s] TO stfuel[s] + fma[e][s][f].
-                }
-            }
-        }
-    }
-
-    // Print/Log consumption, thrust and mass info for all egs, s and f after corrections
-    egLog().
-
-    // 6. Initialize sub-stage information
-    // The information is stored in sub[s][i]:XX with XX = bt, eg, fu, bt2, con, thruV and thruA
-    IF dbg { mLog("-----"). }
-    LOCAL sub TO LIST().
-    LOCAL lex TO LEXICON().
-    // Create sorted sub[s][i]:XX. Sorted in i by shortest to longest burntime of substage (Zero burn
-    // durations are omitted). In eg and fu are the indices to find the corresponding con[eg][st][fu],
-    // thruV[..], thruA[..], fma[..], flt[..] and burn[..] values.
-    FROM {LOCAL s is 0.} UNTIL s > STAGE:NUMBER STEP {set s to s+1.} DO {
-        IF dbg { mLog( "s: "+s). }
-        sub:ADD(LIST()).
-        FROM {LOCAL e is 0.} UNTIL e > eg:LENGTH-1 STEP {set e to e+1.} DO {
-            FROM {LOCAL f is 0.} UNTIL f > fuli:LENGTH-1 STEP {SET f to f+1.} DO {
-                IF dbg { mLog(burn[e][s][f]). }
-                // Only add info for actual burns. This can leave sub[s] empty.
-                IF burn[e][s][f] > 0 {
-                    SET lex to LEXICON("bt", burn[e][s][f],
-                        "eg", e, "fu", f, "bt2", 0, "con", 0, "thruV", 0, "thruA", 0).
-                    LOCAL isinserted TO False.
-                    FOR idx IN RANGE(sub[s]:LENGTH) {
-                        // iterate through all entries by index
-                        // the range is empty if the list is empty
-                        IF burn[e][s][f] <= sub[s][idx]:bt {
-                            // if burn is shorter, insert
-                            // before the current element
-                            sub[s]:INSERT(idx,lex:COPY).
-                            SET isinserted TO True.
-                            BREAK.
-                        }
-                    }
-                    IF NOT isinserted {
-                        // if we didn't insert, it goes to the end
-                        sub[s]:ADD(lex:COPY).
-                    }
-                }
-            }
-        }
-        // The maximum burn duration across all eg and fu for this stage is the last entry.
-        IF dbg {
-            mLog("---").
-            mLog("eg,fu,bt,bt2,con,thruV").
-        }
-        LOCAL pssbd TO 0. // Previous substage burn duration 
-        FROM {LOCAL i is 0.} UNTIL i > sub[s]:LENGTH-1 STEP {set i to i+1.} DO {
-            // Avoid negative values because of floating point accuracy.
-            SET sub[s][i]:bt2 TO MAX(sub[s][i]:bt - pssbd, 0).
-            SET pssbd TO sub[s][i]:bt.
-            // Sum up consuption and thrust for active fuegs
-            IF sub[s][i]:bt > 0 { // Todo: This should always be true!?
-                FROM {LOCAL ii is 0.} UNTIL ii > sub[s]:LENGTH-1 STEP {set ii to ii+1.} DO {
-                    // TODO: This loop can be improved. Sum from i to sub[s]:LENGTH-1
-                    IF sub[s][ii]:bt >= sub[s][i]:bt {
-                        LOCAL f TO sub[s][ii]:fu.
-                        LOCAL e TO sub[s][ii]:eg.
-                        SET sub[s][i]:con TO sub[s][i]:con + fuCorr[f]*con[e][s][f]. // RE corr
-                        SET sub[s][i]:thruV TO sub[s][i]:thruV + thruV[e][s][f].
-                        SET sub[s][i]:thruA TO sub[s][i]:thruA + thruA[e][s][f].
-                    }
-                }
-                IF dbg { mLog(sub[s][i]:eg+","+sub[s][i]:fu+","+sub[s][i]:bt+","+sub[s][i]:bt2+","
-                         +sub[s][i]:con+","+sub[s][i]:thruV). }
-            }
-        }
-        IF dbg { mLog("-----"). }
-    }
-
-    // 7. Final loop, calculated cumulative mass and other derived values, like
+    // 6. Final loop, calculated cumulative mass and other derived values, like
     // start/end TWR, ISP, dV, thrust, burntime
     LOCAL startmass IS 0.
     LOCAL endmass IS 0.
@@ -751,18 +1131,18 @@ FUNCTION stinfo {
     }
     FROM {LOCAL s is 0.} UNTIL s > STAGE:NUMBER STEP {set s to s+1.} DO {
         LOCAL prevstartmass IS startmass. // Technically the next startmass because we start at stage 0
-        LOCAL fuleft TO stleft[s].
-        LOCAL fuburn TO stfuel[s]. // Todo: Could be replaced with stfubu
+        LOCAL fuleft TO stleft[s]. // Fuel left and to be discarded at the end of the stage.
+        LOCAL fuburn TO stfuel[s]. // Fuel burned in stage
         SET endmass TO startmass + stmass[s] + fuleft. // Needs to go before startmass
         SET startmass TO startmass + stmass[s] + fuburn + fuleft.
         LOCAL stagedmass TO CHOOSE endmass - prevstartmass IF s>0 ELSE 0. // Lost when staging the next stage
-        
+
         // Calculate delta V per substage
         LOCAL stfubu TO 0. // Cumulative fuel burned in stage
         LOCAL stVdV TO 0.   // Cumulative vacuum delta V in stage
         LOCAL stAdV TO 0.   // Cumulative atmospheric delta V in stage
         LOCAL curmass TO startmass.
-        
+
         LOCAL sTWR TO 0.
         LOCAL sSLT TO 0.
         IF sub[s]:LENGTH > 0 {
@@ -775,28 +1155,27 @@ FUNCTION stinfo {
         IF dbg {
             mLog("--------").
             mLog("Stage "+s+" Substages:").
-            mLog("i,con,thruV,thruA,ispsV,sfubu,subVdV,subAdV,curmass,submass").
+            mLog("i,bt,con,thruV,thruA,ispsV,sfubu,subVdV,subAdV,curmass,submass").
         }
         FROM {LOCAL i is 0.} UNTIL i > sub[s]:LENGTH-1 STEP {set i to i+1.} DO {
-            IF sub[s][i]:con > 0 { // Todo: This should always be true!?
-                LOCAL fcon TO sub[s][i]:con.
-                LOCAL fthruV TO sub[s][i]:thruV.
-                LOCAL fthruA TO sub[s][i]:thruA.
-                LOCAL ispsV TO fthruV/fcon/CONSTANT:g0.
-                LOCAL ispsC TO fthruA/fcon/CONSTANT:g0.
-                LOCAL subfubu TO fcon*sub[s][i]:bt2. // Fuel burned in substage
-                SET stfubu TO stfubu + subfubu.
-                LOCAL submass TO curmass - subfubu. // Mass at end of current substage
-                SET maxTWR TO MAX(maxTWR, sub[s][i]:thruV/submass/CONSTANT:g0).
-                SET maxSLT TO MAX(maxSLT, sub[s][i]:thruA/submass/CONSTANT:g0).
-                LOCAL subVdV TO ispsV*CONSTANT:g0*LN(curmass/submass).
-                LOCAL subAdV TO ispsC*CONSTANT:g0*LN(curmass/submass).
-                SET stVdV TO stVdV + subVdV.
-                SET stAdV TO stAdV + subAdV.
-                IF dbg { mLog(i+","+fcon+","+fthruV+","+fthruA+","+ispsV+","+subfubu+","+subVdV
-                         +","+subVdV+","+curmass+","+submass). }
-                SET curmass TO submass. // The next substage starts with the current substge end mass.
-            }
+            LOCAL fcon TO sub[s][i]:con.
+            LOCAL fthruV TO sub[s][i]:thruV.
+            LOCAL fthruA TO sub[s][i]:thruA.
+            LOCAL ispsV TO fthruV/fcon/CONSTANT:g0.
+            LOCAL ispsC TO fthruA/fcon/CONSTANT:g0.
+            LOCAL subfubu TO fcon*sub[s][i]:bt. // Fuel burned in substage
+            SET stfubu TO stfubu + subfubu.
+            LOCAL submass TO curmass - subfubu. // Mass at end of current substage
+            SET maxTWR TO MAX(maxTWR, sub[s][i]:thruV/submass/CONSTANT:g0).
+            SET maxSLT TO MAX(maxSLT, sub[s][i]:thruA/submass/CONSTANT:g0).
+            LOCAL subVdV TO ispsV*CONSTANT:g0*LN(curmass/submass).
+            LOCAL subAdV TO ispsC*CONSTANT:g0*LN(curmass/submass).
+            SET stVdV TO stVdV + subVdV.
+            SET stAdV TO stAdV + subAdV.
+            IF dbg { mLog(i+","+nuform(sub[s][i]:bt,3,1)+","+nuform(fcon,1,5)+","+nuform(fthruV,3,0)+","
+                +nuform(fthruA,3,0)+","+nuform(ispsV,3,0)+","+nuform(subfubu,3,2)+","+nuform(subVdV,4,0)
+                          +","+nuform(subAdV,4,0)+","+nuform(curmass,3,2)+","+nuform(submass,3,2)). }
+            SET curmass TO submass. // The next substage starts with the current substge end mass.
         }
         LOCAL KERispV TO 0. // ISPg0 vac like MJ/KER uses
         LOCAL KERispA TO 0. // ISPg0 sea level like MJ/KER uses
@@ -810,7 +1189,7 @@ FUNCTION stinfo {
             mLog("Check fuel burned! Substage cumulative: "+stfubu+" Stage: "+fuburn).
             mLog(" ").
         }
-        
+
         LOCAL KSPispV IS 0.
         LOCAL KSPispA IS 0.
         LOCAL thruV IS stithruV[s].// Thrust in stage (vacuum).
@@ -844,7 +1223,7 @@ FUNCTION stinfo {
         SET sinfo["dur"] TO stburn[s].
 
         SET sinfo["ATMO"] TO atmo.
-        
+
         SET sinfolist[s] TO sinfo:COPY. // Make a copy
 
         IF dbg {
@@ -889,7 +1268,7 @@ FUNCTION stinfo {
             egtali:ADD(p).
             // Find earliest egastage and egdstage for engines.
             IF p:TYPENAME = "Engine" {
-                // This should only trigger for egs with decouplers with crossfeed on. 
+                // This should only trigger for egs with decouplers with crossfeed on.
                 LOCAL pastage TO p:STAGE. // Part becomes active
                 LOCAL pdstage TO p:DECOUPLEDIN. // Part has been removed
                 IF pastage > egastage { SET egastage TO pastage. }
@@ -900,7 +1279,7 @@ FUNCTION stinfo {
         IF p:NAME = "fuelLine" {
             egfdli:ADD(p).
         }.
-        
+
         IF p:HASMODULE("ModuleToggleCrossfeed") {
             // Default for xfeed is True
             IF p:GETMODULE("ModuleToggleCrossfeed"):HASEVENT("enable crossfeed") {
@@ -908,7 +1287,7 @@ FUNCTION stinfo {
                 IF dbg { mLog("Found "+p:TITLE+" with crossfeed: "+xfeed). }
             }
         }
-        
+
         IF p:TYPENAME = "Decoupler" {
             IF xfeed {
                 // One engine group, just traverse through it
@@ -942,13 +1321,13 @@ FUNCTION stinfo {
                 SET stopWalk TO True.
             }
         }
-        
+
         IF thisEg {
             procli:ADD(p:UID).
             egli:ADD(p).
             IF dbg { mLog(p:DECOUPLEDIN+","+p:STAGE+","+p:TITLE+","+p:NAME+","+p:TYPENAME+","+l). }
         }
-        
+
         // The following parts have no Crossfeed. Stop the "walk" here.
         FOR nocf IN nocflist {
             IF p:TITLE:CONTAINS(nocf) {
@@ -959,7 +1338,7 @@ FUNCTION stinfo {
         }
 
         IF stopWalk { RETURN True. }
-        
+
         LOCAL children TO p:CHILDREN.
         FOR child IN children {
             eTree(child,l+1).
@@ -970,9 +1349,92 @@ FUNCTION stinfo {
 
         RETURN True.
     }
-    
+
+
+    FUNCTION setConThru {
+        PARAMETER x,    // Part node.
+                  i.    // Engine group.
+
+        // conF, thruVF and thruAF hold consumption and thrust for the current engine. This makes
+        // the special RE and NERV treatment a little easier.
+        LOCAL conF TO fuliZ:COPY. // Storage for current engine for fuel consumption
+        LOCAL thruVF TO fuliZ:COPY. // Storage for current engine for thrust
+        LOCAL thruAF TO fuliZ:COPY. // Storage for current engine for thrust
+        // Use thrust in vacuum and at current position.
+        LOCAL pthrustvac IS x:POSSIBLETHRUSTAT(0). // Vacuum thrust. Includes thrust limit setting.
+        LOCAL pthrustcur IS x:POSSIBLETHRUST. // Current thrust. Includes thrust limit setting.
+        // Use parameter atmo to control atmospheric pressure used to calculate thrust.
+        IF atmo:ISTYPE("Scalar") {
+            IF atmo < 0 {
+                mLog(" ").
+                mLog("Invalid argument: pressure "+ROUND(atmo,3)+" less than zero").
+                mLog(" ").
+                RETURN 0.
+            }
+            IF atmo > 100 {
+                mLog(" ").
+                mLog("Invalid argument: pressure "+ROUND(atmo,3)+" greater than 100 atm").
+                mLog(" ").
+                RETURN 0.
+            }
+            SET pthrustcur TO x:POSSIBLETHRUSTAT(atmo).
+        } ELSE {
+            SET atmo TO "current pressure".
+        }
+
+        LOCAL tlimit IS x:THRUSTLIMIT/100. // Needed to adjust res:MAXFUELFLOW
+        IF dbg { mLog("Engine: "+x:TITLE+" "+x:STAGE+" "+x:DECOUPLEDIN). }
+        FOR fkey IN x:CONSUMEDRESOURCES:KEYS { // fkey is language localized display name
+            LOCAL cRes TO x:CONSUMEDRESOURCES[fkey]. // Consumed resource
+            LOCAL fname TO cRes:NAME. // Workaround for bug. fname not localized (language)
+            LOCAL fti TO fuli:FIND(fname).
+            // Sanity check if our engine consumes something else than fuli
+            IF fti >= 0 {
+                // Set con[fti]
+                SET conF[fti] TO cRes:MAXFUELFLOW*cRes:DENSITY*tlimit.
+                SET thruVF[fti] TO pthrustvac.
+                SET thruAF[fti] TO pthrustcur.
+            } ELSE IF fname = "ElectricCharge" {
+                // Has no mass - ignored
+            } ELSE {
+                 // RCS thrusters are not engines, this cannot be triggered by momopropellant.
+                IF dbg { mLog("Found unknown fuel "+fname+" - investigate!"). }
+                PRINT 1/0.
+            }
+        }
+        // Special treatment for REs.
+        IF conF[LFidx]*conF[OXidx] > 0 {
+            // Rocket engine - remove LF thrust and consumption from REs.
+            // LF consumption is included below with fuCorr[].
+            SET conF[0] TO 0.
+            SET thruVF[0] TO 0.
+            SET thruAF[0] TO 0.
+        }
+
+        // Now add fuel consumption and thrust to the applicable stages.
+        // This also adds the LF mass consumption correction for REs.
+        FROM {LOCAL s IS 0.} UNTIL s > STAGE:NUMBER STEP {SET s TO s+1.} DO {
+            IF s <= x:STAGE AND s > x:DECOUPLEDIN {
+                // Add values cumulatively.
+                FROM {LOCAL x IS 0.} UNTIL x >= fuli:LENGTH STEP {SET x TO x+1.} DO {
+                    SET con[i][s][x] TO con[i][s][x] + conF[x].
+                    SET thruV[i][s][x] TO thruV[i][s][x] + thruVF[x].
+                    SET thruA[i][s][x] TO thruA[i][s][x] + thruAF[x].
+                    // Also add stage cumulative values.
+                    SET sticon[s] TO sticon[s] + conF[x]*fuCorr[x]. // Correct for OX use.
+                    SET stithruV[s] TO stithruV[s] + thruVF[x].
+                    SET stithruA[s] TO stithruA[s] + thruAF[x].
+                }
+            }
+            // It is wrong to add zeroes (especially with fuliZ:COPY) as other engines in this eg
+            // can have different x:STAGE or x:DECOUPLEDIN values. The xx[i][s][x] lists are initialized
+            // to zero intitially.
+        }
+    }
+
+
     FUNCTION egLog {
-        // Loop over engine groups - for printing con, thruV and fma
+        // Loop over engine groups - for printing con, thruV and thruA
         IF dbg {
             mLog(" ").
             mLog("Eg info").
@@ -980,21 +1442,72 @@ FUNCTION stinfo {
                 // For printing
                 mLog("Eg: "+i+" egastage: "+eg[i]:egastage).
                 mLog("s,con                            ,thruV                              "
-                     +",fma                                ,flt").
+                     +",thruA").
                 FROM {LOCAL s IS 0.} UNTIL s > STAGE:NUMBER STEP {SET s TO s+1.} DO {
                     LOCAL scon TO "".
                     LOCAL sthruV TO "".
-                    LOCAL sfma TO "".
-                    LOCAL sflt TO "".
+                    LOCAL sthruA TO "".
                     LOCAL x TO 0.
                     UNTIL x >= fuli:LENGTH {
-                        SET scon TO scon+","+nuform(con[i][s][x],3,3).
+                        LOCAL cW TO con[i][s][x].
+                        IF x = XEidx { SET cW TO cW*1000. } // Xenon needs a boost.
+                        SET scon TO scon+","+nuform(cW,3,3).
                         SET sthruV TO sthruV+","+nuform(thruV[i][s][x],4,2).
-                        SET sfma TO sfma+","+nuform(fma[i][s][x],4,2).
-                        SET sflt TO sflt+","+nuform(flt[i][s][x],4,2).
+                        SET sthruA TO sthruA+","+nuform(thruA[i][s][x],4,2).
                         SET x to x + 1.
                     }
-                    mLog(s+scon+sthruV+sfma+sflt).
+                    mLog(s+scon+sthruV+sthruA).
+                }
+            }
+        }
+    }
+
+    FUNCTION egFuLog {
+        PARAMETER s.    // Stage.
+        // Loop over engine groups - for printing cfma
+        IF dbg {
+            mLog("Eg info - Stage: "+s).
+            mLog("eg,as,ds,cfma").
+            FROM {local i is 0.} UNTIL i > eg:LENGTH-1 STEP {set i to i+1.} DO {
+                // For printing
+                IF s > eg[i]:egdstage {
+                        LOCAL scfma TO "".
+                        LOCAL x TO 0.
+                        UNTIL x >= fuli:LENGTH {
+                            SET scfma TO scfma+","+nuform(cfma[i][x],3,2).
+                            SET x to x + 1.
+                        }
+                        mLog(nuform(i,2,0)+","+nuform(eg[i]:egastage,2,0)+","+nuform(eg[i]:egdstage,2,0)+scfma).
+                }
+            }
+        }
+    }
+
+    FUNCTION egCoFuLog {
+        PARAMETER s.    // Stage.
+        // Loop over engine groups - for printing conW, fdfma, fdnum
+        IF dbg {
+            mLog("eg,as,ds,conW                       ,conP                       ,fdfma                      ,fdnum").
+            FROM {local i is 0.} UNTIL i > eg:LENGTH-1 STEP {set i to i+1.} DO {
+                // For printing
+                IF s > eg[i]:egdstage {
+                        LOCAL sconW TO "".
+                        LOCAL sconP TO "".
+                        LOCAL sfdfma TO "".
+                        LOCAL sfdnum TO "".
+                        LOCAL x TO 0.
+                        UNTIL x >= fuli:LENGTH {
+                            LOCAL cW TO conW[i][x].
+                            LOCAL cP TO conP[i][x].
+                            IF x = XEidx { SET cW TO cW*1000. SET cP TO cP*1000. } // Xenon needs a boost.
+                            SET sconW TO sconW+","+nuform(cW,2,3).
+                            SET sconP TO sconP+","+nuform(cP,2,3).
+                            SET sfdfma TO sfdfma+","+nuform(fdfma[i][x],3,2).
+                            SET sfdnum TO sfdnum+","+nuform(fdnum[i][x],2,0).
+                            SET x to x + 1.
+                        }
+                        mLog(nuform(i,2,0)+","+nuform(eg[i]:egastage,2,0)+","+nuform(eg[i]:egdstage,2,0)
+                             +sconW+sconP+sfdfma+sfdnum).
                 }
             }
         }

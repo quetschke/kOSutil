@@ -1,11 +1,11 @@
 // sitest.ks - Test sinfo script
 // Copyright © 2021 V. Quetschke
-// Version 0.2, 07/18/2021
+// Version 0.2.1, 08/10/2021
 @LAZYGLOBAL OFF.
 RUNONCEPATH("libcommon").
 
-SET TERMINAL:WIDTH TO 76.
-SET TERMINAL:HEIGHT TO 45.
+SET TERMINAL:WIDTH TO 77.
+//SET TERMINAL:HEIGHT TO 45.
 
 // Run it at full speed!
 SET CONFIG:IPU TO 2000.
@@ -53,7 +53,7 @@ FROM {local s is 0.} UNTIL s > STAGE:NUMBER STEP {set s to s+1.} DO {
         +nuform(si[s]:DMass,3,2)+nuform(si[s]:BMass,3,2)+nuform(si[s]:sTWR,3,2)
         +nuform(si[s]:maxTWR,3,2)+nuform(si[s]:KSPispV,5,2)
         +nuform(si[s]:KERispV,5,2)+" "+nuform(si[s]:VdV,4,1)
-        +" "+nuform(SHIP:STAGEDELTAV(s):VACUUM,4,1)+" "+nuform(si[s]:dur,4,1).
+        +" "+nuform(SHIP:STAGEDELTAV(s):VACUUM,4,1)+" "+nuform(si[s]:dur,4,2).
 }
 PRINT " ".
 PRINT "s:    FtV    FtA  sSLT maSLT KSPispA KERispA    AdV KSP ASL dV KSP Cur dV".

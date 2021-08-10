@@ -1,6 +1,11 @@
-// sinfo.ks - Collect stage stats. Walk the tree starting from an engine recursively
+// sinfo_no_fd.ks - Collect stage stats. Walk the tree starting from an engine recursively
+// This version does not understand fuel ducts and is kept for posterity.
+// Use:
+// $ git log --follow sinfo_no_fd.ks
+// to see the pre-copy history.
+//
 // Copyright © 2021 V. Quetschke
-// Version 0.6.2, 07/22/2021
+// Version 0.6.3, 08/10/2021
 @LAZYGLOBAL OFF.
 
 // Enabling dbg will create a logfile (0:sinfo.log) that can be used for
