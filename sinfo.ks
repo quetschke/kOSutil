@@ -604,6 +604,7 @@ FUNCTION stinfo {
         LOCAL dostage TO False.
         LOCAL hasdropeg TO False.
         LOCAL nofuel TO True.
+        LOCAL fuleft TO 0. // Fuel left that cannot be burned.
         LOCAL acteg TO 0.
         LOCAL dropeg TO "".
         FROM {LOCAL e is 0.} UNTIL e > eg:LENGTH-1 STEP {set e to e+1.} DO {
@@ -622,6 +623,9 @@ FUNCTION stinfo {
                         // For RE LF & OX prohibit staging
                         IF f = OXidx { SET tfuel TO tfuel + cfma[e][LFidx]. }
                     }
+                    // Collect all fuel left.
+                    SET fuleft TO fuleft + cfma[e][f].
+
                 }
                 IF tfuel > 1e-7 {
                     SET nofuel TO False.
@@ -635,7 +639,8 @@ FUNCTION stinfo {
             IF dbg OR 1 { mLog("s: "+s+" No stages active - stage!"). }
         } ELSE IF nofuel AND hasdropeg {
             SET dostage TO True.
-            IF dbg OR 1 { mLog("s: "+s+" All stages empty - stage: "+dropeg). }
+            SET stleft[s] TO fuleft.
+            IF dbg OR 1 { mLog("s: "+s+" All stages empty - stage: "+dropeg+" dropping fuel: "+ROUND(stleft[s],3)). }
         }
         IF dbg AND dostage { mLog("We can stage / skip UNTIL loop."). }
 
