@@ -16,7 +16,9 @@ to use the current pressure around the vessel.
  
 Caveats:
 * Air breathing engines are not considered and might break the script.
-* Fuel Ducts are not implemented. [kOS does not provide the target information of the part](https://github.com/KSP-KOS/KOS/issues/1974).
+* Fuel Ducts are implemented but need some additional input because [kOS does not provide the target information of the part](https://github.com/KSP-KOS/KOS/issues/1974) is needed. Two methods are used to tell the script where fuel ducts go:
+  1. Add matching kOS tags to the fuel duct and the target object. (See figure 1 below)
+  2. If no suitable tags are found, the library assumes the other side of the decoupler that drops the part or group of parts where the fuel duct is attached to as the target of the fuel duct. This works in simple cases, but the asparagus staging example from figure 1 needs tags to assist the sinfo library.
 * The library is not tested with non-stock parts.
 
 The following values are currently returned for each stage in the form ``returnvar[stage]:key``, with
