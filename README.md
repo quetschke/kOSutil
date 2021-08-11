@@ -43,6 +43,9 @@ dur     .. burn duration
 ATMO    .. Atmospheric pressure used for thrust calculation
 ```
 
+<img src="img/sinfo_fig2a.jpg" width="49%"></img> <img src="img/sinfo_fig1a.jpg" width="49%"></img>
+**Figure 1:** (left) Vessel in the VAB with KER readout and showing kOS tags. (right) Vessel showing staging information after executing sitest.ks and also showing MechJeb vessel information for comparison.
+
 The ``sinfo.ks`` library can be tested by running the ``sitest.ks`` test script.
 
 ### Multi-stage maneuver execution script
