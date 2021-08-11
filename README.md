@@ -4,9 +4,9 @@ Repository with files and utilities for the [kOS mod](https://github.com/KSP-KOS
 ## Contents
 The following topics are currently addressed:
 
-### Library to provide staging information
+### Library to provide extended staging information
 The user interface of KSP provides information about Delta V, ISP, Thrust, TWR, Start/End Mass and
-Burn Time, but kOS makes the
+Burn Time, but kOS **only** makes the
 [Delta V information per stage](https://ksp-kos.github.io/KOS/structures/vessels/deltav.html) available.
 The ``sinfo.ks`` library recalculates those and other values and provides access to the values via a
 list/lexicon structure. The values match those provided through Kerbal Engineer Redux, or MechJeb.
