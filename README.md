@@ -11,6 +11,11 @@ Burn Time, but kOS **only** makes the
 The ``sinfo.ks`` library recalculates those and other values and provides access to the values via a
 list/lexicon structure. The values match those provided through Kerbal Engineer Redux, or MechJeb.
 
+#### Files
+- ``sinfo.ks``        Main library file providing the ``sinfo()`` function.
+- ``sitest.ks``       A test script to demonstrate the ``sinfo()`` usage.
+- ``sinfo_no_fd.ks``  A legacy version that does **not** support _fuel ducts_.
+
 The ``sinfo()`` function accepts a parameter to define the atmospheric pressure for in atmosphere values or
 to use the current pressure around the vessel.
  
