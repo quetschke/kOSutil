@@ -1,7 +1,6 @@
-// sinfo2.ks - Collect stage stats. Walk the tree starting from an engine recursively
+// sinfo.ks - Collect stage stats. Walk the tree starting from an engine recursively
 // Copyright © 2021 V. Quetschke
-// Version 0.8.3, 08/10/2021
-// Start cutting
+// Version 0.8.4, 08/11/2021
 @LAZYGLOBAL OFF.
 
 // Enabling dbg will create a logfile (0:sinfo.log) that can be used for
@@ -9,7 +8,6 @@
 //LOCAL dbg TO TRUE.
 LOCAL dbg TO FALSE.
 
-// TODO: drop-tanks
 // TODO: SRBs share fuel in eg, but not in "reality". Average consuption and fuelmass for SRBs will fail for
 //       "unmatched" SRBs. Possible solution: Create an eg for every SRB. Maybe later ...
 
@@ -85,8 +83,8 @@ RUNONCEPATH("libcommon").
 //   stleft[st] Unburned left fuel in stage
 //
 // This is done in several passes:
-// 1. First the script loops over all engines to create engine groups (eg). An eg is
-//    attached to the same fuel reservoir (connected tanks).
+// 1. First the script loops over all engines and fuel ducts to create engine groups (eg). An eg is
+//    made up by all parts attached to the same fuel reservoir (connected tanks).
 //    Each eg keeps the information in the form eg[idx]:key:
 //      egli     List of parts in eg
 //      egtali   Holds all tanks and engines from engine group.
@@ -205,6 +203,7 @@ FUNCTION stinfo {
     LOCAL actfdstart TO LIST(). // List of eg that have no incoming fd.
     LOCAL actfdend TO LIST().   // List of eg that have no outgoing fd.
 
+    // Parts that "block" crossfeed across them:
     LOCAL nocflist TO LIST("I-Beam", "Strut Connector", "Structural Panel").
     // The list of fuels known to this script. Might grow for newer versions or mods
     LOCAL fuli TO LIST("LiquidFuel", "Oxidizer", "SolidFuel", "XenonGas").
@@ -237,8 +236,15 @@ FUNCTION stinfo {
     LOCAL burndu TO LIST(). // Burn duration per eg, fu.
     LOCAL donebu TO LIST(). // Has done/scheduled a burn per eg, fu.
 
-    // 1. First the script loops over all engines to create engine groups (eg)
+    // 1. First the script loops over all engines and fuel ducts to create engine groups (eg).
     LOCAL elist TO -999. LIST ENGINES IN elist.
+    // Find fuel ducts and add them to elist. We want to have eg without engines to handle "drop tanks" when
+    // using fuel ducts.
+    {   LOCAL fdlist TO SHIP:PARTSNAMED("fuelLine").
+        FOR p IN fdlist {
+            elist:ADD(p). // Really? kOS doesn't have a command for that?
+        }
+    }
 
     IF dbg { mLog("p:DECOUPLEDIN,p:STAGE,p:TITLE,p:NAME,p:TYPENAME,lvl"). }
     LOCAL egidx TO 0.
@@ -1264,7 +1270,7 @@ FUNCTION stinfo {
         LOCAL stopWalk TO False. // Stop recursion when true.
 
         IF p:MASS > p:DRYMASS or p:TYPENAME = "Engine" {
-            IF dbg { mLog("Found engine or tank."). }
+            //IF dbg { mLog("Found engine or tank."). }
             egtali:ADD(p).
             // Find earliest egastage and egdstage for engines.
             IF p:TYPENAME = "Engine" {
@@ -1284,7 +1290,7 @@ FUNCTION stinfo {
             // Default for xfeed is True
             IF p:GETMODULE("ModuleToggleCrossfeed"):HASEVENT("enable crossfeed") {
                 SET xfeed TO False.
-                IF dbg { mLog("Found "+p:TITLE+" with crossfeed: "+xfeed). }
+                IF dbg { mLog("     Found "+p:TITLE+" with crossfeed: "+xfeed). }
             }
         }
 
@@ -1310,11 +1316,11 @@ FUNCTION stinfo {
                     // Count for this engine group
                     procli:ADD(p:UID).
                     egli:ADD(p).
-                    IF dbg { mLog("Keep in this eg!"). }
+                    IF dbg { mLog("     Keep in this eg!"). }
                 } ELSE {
                     // Found decoupler to later stage
                     SET thisEg TO False.
-                    IF dbg { mLog("Count in other eg!"). }
+                    IF dbg { mLog("     Count in other eg!"). }
                     // Count for later engine group.
                 }
                 // Do not traverse through decoupler.
@@ -1331,7 +1337,7 @@ FUNCTION stinfo {
         // The following parts have no Crossfeed. Stop the "walk" here.
         FOR nocf IN nocflist {
             IF p:TITLE:CONTAINS(nocf) {
-                IF dbg { mLog("Found "+p:TITLE+" with crossfeed: "+False). }
+                IF dbg { mLog("     Found "+p:TITLE+" with crossfeed: "+False). }
                 SET stopWalk TO True.
                 BREAK.
             }
