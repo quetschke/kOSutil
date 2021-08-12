@@ -69,9 +69,11 @@ The function simulates the fuel consumption and thrust, more on that below, to c
 **Figure 1:** (left) Vessel in the VAB with KER readout and showing kOS tags. (right) Vessel showing staging information after executing sitest.ks and also showing MechJeb vessel information for comparison.
 
 ### Under the hood
-This section will describe the method to calculate the staging information.
+This section will describe the method to calculate the extended staging information that is used by this function.  The information about Delta V, ISP, Thrust, TWR, Start/End Mass and Burn Time is provided by the KSP user interface and extended information can be obtained by using [Kerbal Engineer Redux](https://forum.kerbalspaceprogram.com/index.php?/topic/17833-130-kerbal-engineer-redux-1130-2017-05-28/) or [MechJeb](https://forum.kerbalspaceprogram.com/index.php?/topic/154834-112x-anatid-robotics-mumech-mechjeb-autopilot-2121-8th-august-2021/&ct=1628797784). Unfortunately, neither of those sources is available through kOS.
 
-The calculation of Delta V requires the knowledge of fuel consumption and thrust (this implies ISP and mass). The function calculates this and related information for every stage of the vessel.
+The calculation of Delta V requires the knowledge of fuel consumption and thrust (this implies ISP and mass). The function calculates this and related information for every stage of the vessel. The computing power of kOS prohibits a brute force approach that would simulate the fuel usage obeying flow priorities with [physics ticks](https://ksp-kos.github.io/KOS/general/cpu_hardware.html?highlight=physics%20ticks#update-ticks-and-physics-ticks) accuracy. MechJeb, for example, uses this approach.
+
+The limitations of kOS lead to the approach as laid out below. 
 
 #### Engine groups or fuel zones
 The function looks at every part of the vessel and groups them together when crossfeed is enabled between touching parts. That means all parts in one of those groups have access to all the fuel in this group. The exception from this are SRBs, they do not _share_ their own fuel, but allow for crossfeed and connect other parts in the same group.
@@ -82,7 +84,13 @@ Defining engine groups allows to track fuel, fuel consumption and thrust per eng
 For stages with decouplers, KSP (and this function) assumes that it will immediately stage after all active engines connected to this decoupler are out of all available fuel.
 
 #### Tracking changes when a stage is activated - burning
-To be continued ...
+The Delta V calculation is straight forward when the thrust and rate of fuel consumption stay constant for the full duration of the burn until all fuel in the stage has been used up. When multiple engine groups with different burn durations, different fuel consumption rates and different engine types with different fuels (rocket engines, nuclear engines, ion drives and solid rocket boosters) are present the total burn duration of the stage needs to be split up in smaller intervals.
+
+To accomodate this, the burn is split into the longest possible intervals where the thrust and rate of fuel consumption stay constant.
+
+This is achieved looking for the minmum burn time of any of the engine groups for all participating engine types. For this interval the consuption rate and thrust of all active engines in all engine groups is calculated and then the fuel in the engine group is reduced accordingly.
+
+After this fuel consumption the next minimum burn time is found and the fuel is consumed accordingly again. This is repeated until no usable fuel in any of the engine groups that are about to be staged is left. Then staging can occur and the process starts again for the next stage.
 
 #### Fuel Ducts
 
