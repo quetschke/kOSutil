@@ -50,7 +50,7 @@ On success: A list of lexicons with one lexicon entry per stage with the followi
   ATMO    .. Atmospheric pressure used for thrust calculation (same value in all stages)
 ```
 
-##### Requirements and Usage
+#### Requirements and Usage
 The function simulates the fuel consumption and thrust, more on that below, to calculate the Delta V (this implies knowing ISP and mass) available for each of the stages. Some assumptions are made as laid out below. Violation of these requrements will likely lead to incorrect staging information or an error message.
 * **Fuel Ducts** need some additional preparations and precautions:
   * Use [kOS tags](https://ksp-kos.github.io/KOS/general/nametag.html) to mark the target of the duct. Assigning the same _tag_ to the fuel duct and the target it attaches to will tell the function where it connects to. See also Figure 1 (left) below. This is needed because kOS does [not provide the target information of the part](https://github.com/KSP-KOS/KOS/issues/1974) that the duct connects to.
@@ -59,30 +59,31 @@ The function simulates the fuel consumption and thrust, more on that below, to c
 * The function assumes that the group that the duct leads out (_source_) is **decoupled earlier** than the group the duct targets to (_target_). This assures that the **_source_ is drained completely before drawing fuel from the _target_**. This is KSP's default behavior, unless the flow priority of the tanks is changed - be careful!
 * **Flow Priority** of the tanks is not considered when simulating the fuel usage, but might lead to unexpected results when altered.
 
-##### Caveats
+#### Caveats
 * Air breathing engines are not considered and might break the function.
+* Solid Rocket Boosters within the same [_fuel zone_](#Engine-groups-or-fuel-zones) need to be of the same type with the same thrust, consumption rate and fuel mass.
 * The library is not tested with non-stock parts.
 
-##### Figures
+#### Figures
 <img src="img/sinfo_fig2a.jpg" width="49%"></img> <img src="img/sinfo_fig1a.jpg" width="49%"></img>
 **Figure 1:** (left) Vessel in the VAB with KER readout and showing kOS tags. (right) Vessel showing staging information after executing sitest.ks and also showing MechJeb vessel information for comparison.
 
-#### Under the hood
+### Under the hood
 This section will describe the method to calculate the staging information.
 
 The calculation of Delta V requires the knowledge of fuel consumption and thrust (this implies ISP and mass). The function calculates this and related information for every stage of the vessel.
 
-##### Engine groups or fuel zones
+#### Engine groups or fuel zones
 The function looks at every part of the vessel and groups them together when crossfeed is enabled between touching parts. That means all parts in one of those groups have access to all the fuel in this group. The exception from this are SRBs, they do not _share_ their own fuel, but allow for crossfeed and connect other parts in the same group.
 
 Defining engine groups allows to track fuel, fuel consumption and thrust per engine group.
 
-##### Staging
+#### Staging
 For stages with decouplers, KSP (and this function) assumes that it will immediately stage after all active engines connected to this decoupler are out of all available fuel.
 
-##### Tracking changes when a stage is activated - burning
+#### Tracking changes when a stage is activated - burning
 To be continued ...
 
-##### Fuel Ducts
+#### Fuel Ducts
 
 
