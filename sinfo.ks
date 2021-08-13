@@ -1,6 +1,6 @@
 // sinfo.ks - Collect stage stats. Walk the tree starting from an engine recursively
 // Copyright © 2021 V. Quetschke
-// Version 0.8.4, 08/11/2021
+// Version 0.8.5, 08/13/2021
 @LAZYGLOBAL OFF.
 
 // Enabling dbg will create a logfile (0:sinfo.log) that can be used for
@@ -203,8 +203,31 @@ FUNCTION stinfo {
     LOCAL actfdstart TO LIST(). // List of eg that have no incoming fd.
     LOCAL actfdend TO LIST().   // List of eg that have no outgoing fd.
 
+    // Fairings with panel mass - expand later for non-stock parts
+    LOCAL fairingmass TO LEXICON(
+        "fairingSize1", 0.075,  // AE-FF1
+        "fairingSize1p5", 0.15, // AE-FF1.5
+        "fairingSize2", 0.175,  // AE-FF2
+        "fairingSize3", 0.475,  // AE-FF3
+        "fairingSize4", 0.8     // AE-FF4
+        ).
     // Parts that "block" crossfeed across them:
-    LOCAL nocflist TO LIST("I-Beam", "Strut Connector", "Structural Panel").
+    //LOCAL nocflist TO LIST("I-Beam", "Strut Connector", "Structural Panel").
+    // List of parts with "fuelCrossFeed = False". Extracted from *.cfg files.
+    LOCAL nocflist TO LIST("smallHardpoint",    // Squad stock
+                           "structuralIBeam1", "structuralIBeam2", "structuralIBeam3",
+                           "structuralPylon",
+                           "structuralPanel1", "structuralPanel2",
+                           "InflatableHeatShield",
+                           "HeatShield0", "HeatShield1", "HeatShield2", "HeatShield3",
+                           "noseCone", "rocketNoseCone", "rocketNoseCone_v2", "rocketNoseConeSize3",
+                           "strutConnector",
+                           "Panel0", "Panel1", "Panel1p5", "Panel2",    // Squad expansion
+                           "EquiTriangle0", "EquiTriangle1", "EquiTriangle1p5", "EquiTriangle2",
+                           "Size_1_5_Cone", "rocketNoseConeSize4",
+                           "Triangle0", "Triangle1", "Triangle1p5", "Triangle2",
+                           "HeatShield1p5" ).
+
     // The list of fuels known to this script. Might grow for newer versions or mods
     LOCAL fuli TO LIST("LiquidFuel", "Oxidizer", "SolidFuel", "XenonGas").
     // We use the variables to identify LF and OX.
@@ -304,23 +327,9 @@ FUNCTION stinfo {
         }
 
         // Fairings need special treatment
-        // Todo: Use lexicon.
-        IF p:TITLE:STARTSWITH("AE-FF") { // A fairing
-            LOCAL fpanel IS 0.
-            IF p:TITLE:STARTSWITH("AE-FF1 ") { //Note the " " at the end
-                SET fpanel TO p:MASS - 0.075.
-            } ELSE IF p:TITLE:STARTSWITH("AE-FF1.5") {
-                SET fpanel TO p:MASS - 0.15.
-            } ELSE IF p:TITLE:STARTSWITH("AE-FF2") {
-                SET fpanel TO p:MASS - 0.175.
-            } ELSE IF p:TITLE:STARTSWITH("AE-FF3") {
-                SET fpanel TO p:MASS - 0.475.
-            } ELSE IF p:TITLE:STARTSWITH("AE-FF5") {
-                SET fpanel TO p:MASS - 0.8.
-            } ELSE {
-                PRINT "Unknown fairing!".
-                PRINT 10/0.
-            }
+        IF fairingmass:HASKEY(p:NAME) { // A fairing
+            mLog(p:TITLE+" / "+p:NAME).
+            LOCAL fpanel IS p:MASS - fairingmass[p:NAME].
             // When staged the panel mass is dropped, but on the stage before it is there.
             // Make sure the fairing is not in the active stage
             IF ast < STAGE:NUMBER {
@@ -1340,12 +1349,9 @@ FUNCTION stinfo {
         }
 
         // The following parts have no Crossfeed. Stop the "walk" here.
-        FOR nocf IN nocflist {
-            IF p:TITLE:CONTAINS(nocf) {
-                IF dbg { mLog("     Found "+p:TITLE+" with crossfeed: "+False). }
-                SET stopWalk TO True.
-                BREAK.
-            }
+        IF nocflist:CONTAINS(p:NAME) {
+            IF dbg { mLog("     Found "+p:TITLE+" with crossfeed: "+False). }
+            SET stopWalk TO True.
         }
 
         IF stopWalk { RETURN True. }
@@ -1393,7 +1399,7 @@ FUNCTION stinfo {
             SET atmo TO "current pressure".
         }
 
-        LOCAL tlimit IS x:THRUSTLIMIT/100. // Needed to adjust res:MAXFUELFLOW
+        LOCAL tlimit IS x:THRUSTLIMIT/100. // Needed to adjust res:MAXMASSFLOW
         IF dbg { mLog("Engine: "+x:TITLE+" "+x:STAGE+" "+x:DECOUPLEDIN). }
         FOR fkey IN x:CONSUMEDRESOURCES:KEYS { // fkey is language localized display name
             LOCAL cRes TO x:CONSUMEDRESOURCES[fkey]. // Consumed resource
@@ -1402,7 +1408,7 @@ FUNCTION stinfo {
             // Sanity check if our engine consumes something else than fuli
             IF fti >= 0 {
                 // Set con[fti]
-                SET conF[fti] TO cRes:MAXFUELFLOW*cRes:DENSITY*tlimit.
+                SET conF[fti] TO cRes:MAXMASSFLOW*tlimit.
                 SET thruVF[fti] TO pthrustvac.
                 SET thruAF[fti] TO pthrustcur.
             } ELSE IF fname = "ElectricCharge" {
