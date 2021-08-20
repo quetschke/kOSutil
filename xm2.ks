@@ -1,6 +1,6 @@
 // xm2.ks - Execute maneuver node script
 // Copyright © 2021 V. Quetschke
-// Version 0.5, 07/18/2021
+// Version 0.6, 08/20/2021
 @LAZYGLOBAL OFF.
 RUNONCEPATH("libcommon").
 SET TERMINAL:HEIGHT TO 38.
@@ -197,8 +197,13 @@ UNTIL (SHIP:Q = 0) or (Node:ETA-BurnDur2-WarpStopTime <= 0)  {
 
 WAIT 1.
 LOCK STEERING TO Node:DELTAV.
+
+// Before warping let's point in the right direction.
+WAIT UNTIL VANG(SHIP:FACING:FOREVECTOR,STEERING) <  1.
+
+// Warp!
 SET WARPMODE TO "rails".
-print "Warping to maneuver node point" at (0,0).
+PRINT "Warping to maneuver node point" at (0,0).
 LOCAL NodeTime TO Node:TIME.
 PRINT "Warping.                                  " at (0,8).
 WARPTO(NodeTime-BurnDur2-WarpStopTime). // Returns immediately, but warps ...

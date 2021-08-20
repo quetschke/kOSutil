@@ -1,6 +1,6 @@
 // sinfo.ks - Collect stage stats. Walk the tree starting from an engine recursively
 // Copyright © 2021 V. Quetschke
-// Version 0.8.5, 08/13/2021
+// Version 0.8.6, 08/20/2021
 @LAZYGLOBAL OFF.
 
 // Enabling dbg will create a logfile (0:sinfo.log) that can be used for
@@ -328,7 +328,7 @@ FUNCTION stinfo {
 
         // Fairings need special treatment
         IF fairingmass:HASKEY(p:NAME) { // A fairing
-            mLog(p:TITLE+" / "+p:NAME).
+            //mLog(p:TITLE+" / "+p:NAME).
             LOCAL fpanel IS p:MASS - fairingmass[p:NAME].
             // When staged the panel mass is dropped, but on the stage before it is there.
             // Make sure the fairing is not in the active stage
