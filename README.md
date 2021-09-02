@@ -28,6 +28,9 @@ KSP provides, but that otherwise is not available through kOS.
 The script times the ignition so that one half of the Delta V is applied before the maneuver time (``node:ETA``) and
 the other half after.
 
+### Script to very precisely set the Orbital Period of a craft
+The ``SetPeriod.ks`` script takes one parameter that sets the target orbital period of a vessel in seconds. The burn is executed immediately and will result in an orbital period that is less than one microsecond (1 us) deviating from the target period.
+
 ### Library of frequently used functions
 The ``libcommon.ks`` library contains functions that are used by the scripts and libraries above. 
 The following function is provided:
