@@ -2,9 +2,13 @@
 // Copyright © 2021 V. Quetschke
 // Version 0.6, 08/20/2021
 @LAZYGLOBAL OFF.
+
+// Store current IPU value.
+LOCAL myIPU TO CONFIG:IPU.
+SET CONFIG:IPU TO 2000. // Makes the timing a little better.
+// SET TERMINAL:HEIGHT TO 38. // Height to fit screen output. 
+
 RUNONCEPATH("libcommon").
-SET TERMINAL:HEIGHT TO 38.
-//SET CONFIG:IPU TO 2000. // Makes the timing a little better.
 
 LOCAL WarpStopTime to 15. //custom value
 LOCAL StagingDur TO 0.58+0.01. // Time it takes to complete staging event. (measured, add 1/2 cycle)
@@ -185,9 +189,8 @@ WHEN defined runXMN then {
     RETURN runXMN.  // Removes the trigger when runXMN is false
 }
 
-RCS ON.
-SAS OFF.
-SET THROTTLE TO 0.
+RCS ON. SAS OFF.
+LOCK THROTTLE TO 0.
 
 // We need to wait until we clear the atmosphere before warping
 UNTIL (SHIP:Q = 0) or (Node:ETA-BurnDur2-WarpStopTime <= 0)  {
@@ -228,7 +231,7 @@ WHEN MAXTHRUST<stageThrust THEN { // No more fuel?
     // "STAGE:READY" this means that the "Stage dur.:" value printed below is exactly the
     // time that was spent on staging, without any thrust. This value is used for the
     // StagingDur variable.
-    SET THROTTLE TO 0.
+    LOCK THROTTLE TO 0.
 	STAGE.
     UNTIL STAGE:READY { WAIT 0. }
     SET cTWR TO AVAILABLETHRUST/SHIP:MASS/CONSTANT:g0.
@@ -241,7 +244,7 @@ WHEN MAXTHRUST<stageThrust THEN { // No more fuel?
         IF Node:BURNVECTOR:MAG < STAGE:DELTAV:CURRENT {
             SET CanThrottle TO TRUE.
         }
-        SET THROTTLE TO 1.
+        LOCK THROTTLE TO 1.
 	} ELSE {
 		print "Stage "+STAGE:NUMBER+" has no thrust. AVAILABLETHRUST: "+round(AVAILABLETHRUST,2)+" kN.".
     }
@@ -251,13 +254,13 @@ WHEN MAXTHRUST<stageThrust THEN { // No more fuel?
 
 // Wait for alignment and predicted time to start the burn. (Minus a physics cycle.)
 WAIT UNTIL VANG(SHIP:FACING:FOREVECTOR,STEERING) <  1 AND TIME:SECONDS > NodeTime-BurnDur2-0.02.
-SET THROTTLE to 1. // Directly after the WAIT command. PRINT takes time!
+LOCK THROTTLE to 1. // Directly after the WAIT command. PRINT takes time!
 PRINT "Warping done.                             " at (0,8).
 PRINT "Set throttle to 100%".
 
 // Just for testing. Set throttle to 66% after the node
 //WAIT UNTIL TIME:SECONDS > NodeTime+1.
-//SET THROTTLE TO 0.5.
+//LOCK THROTTLE TO 0.5.
 //PRINT "Set throttle to 50".
 
 // Measure how close we got to NodeTime
@@ -273,7 +276,7 @@ PRINT "Waiting for 0.25s remaining burn time ...".
 WAIT UNTIL CanThrottle AND BurnTimeC() < 0.25.
 PRINT "Extend burn to 3s.".
 LOCAL TSET TO BurnTimeC()/3.
-SET THROTTLE TO TSET.
+LOCK THROTTLE TO TSET.
 PRINT "Set throttle: "+ROUND(TSET,2).
 
 // Me:
@@ -284,8 +287,7 @@ WAIT UNTIL VDOT(NodedV0, Node:DELTAV) < 0.
 LOCK THROTTLE TO 0.
 PRINT "Burn completed!".
 
-RCS OFF.
-SAS ON.
+RCS OFF. SAS ON.
 UNLOCK STEERING.
 LOCK THROTTLE TO 0. UNLOCK THROTTLE.
 SET runXMN TO FALSE.
@@ -293,3 +295,5 @@ WAIT 0.03.
 REMOVE NODE.
 
 SET SHIP:CONTROL:PILOTMAINTHROTTLE TO 0.
+
+SET CONFIG:IPU TO myIPU. // Restores original value.

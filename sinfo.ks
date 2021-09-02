@@ -1,6 +1,6 @@
 // sinfo.ks - Collect stage stats. Walk the tree starting from an engine recursively
 // Copyright © 2021 V. Quetschke
-// Version 0.8.6, 08/20/2021
+// Version 0.8.7, 08/25/2021
 @LAZYGLOBAL OFF.
 
 // Enabling dbg will create a logfile (0:sinfo.log) that can be used for
@@ -645,11 +645,11 @@ FUNCTION stinfo {
         // We need to stage if no eg is active.
         IF acteg < 1 {
             SET dostage TO True.
-            IF dbg OR 1 { mLog("s: "+s+" No stages active - stage!"). }
+            IF dbg { mLog("s: "+s+" No stages active - stage!"). }
         } ELSE IF nofuel AND hasdropeg {
             SET dostage TO True.
             SET stleft[s] TO fuleft.
-            IF dbg OR 1 { mLog("s: "+s+" All stages empty - stage: "+dropeg+" dropping fuel: "+ROUND(stleft[s],3)). }
+            IF dbg { mLog("s: "+s+" All stages empty - stage: "+dropeg+" dropping fuel: "+ROUND(stleft[s],3)). }
         }
         IF dbg AND dostage { mLog("We can stage / skip UNTIL loop."). }
 
@@ -873,12 +873,12 @@ FUNCTION stinfo {
 
             SET minburn TO CHOOSE 0 IF minburn = 1e12 ELSE minburn.
             SET btstage TO btstage+minburn.
-            IF dbg OR 1 {
+            IF dbg {
                 mLog("s: "+s+" Minimum burn: "+ROUND(minburn,2)).
             }
 
             IF minburn = 0 {
-                IF dbg OR 1 { mLog("   No burn? Stage! Discard leftover LF fuel."). }
+                IF dbg { mLog("   No burn? Stage! Discard leftover LF fuel."). }
                 SET dostage TO True.
             } ELSE {
                 // Consume the fuel for minburn.
@@ -1011,7 +1011,7 @@ FUNCTION stinfo {
             IF dostage {
                 SET stburn[s] TO btstage.
                 SET stleft[s] TO fuleft.
-                IF dbg OR 1 {
+                IF dbg {
                     mLog("s: "+s+" Burntime: "+ROUND(btstage,2)
                         +" burned: "+ROUND(stfuel[s],3)+" left: "+ROUND(stleft[s],3)).
                 }
