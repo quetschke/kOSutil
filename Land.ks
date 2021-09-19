@@ -1,9 +1,14 @@
 // land.ks - Land at target
 // Copyright © 2021 V. Quetschke
-// Version 0.2, 09/06/2021
+// Version 0.3, 09/19/2021
 @LAZYGLOBAL OFF.
 
 // Script to land on the surface of a body.
+// The script takes no parameters.
+// If the script finds a maneuver node it executes it and then continues with the landing procedure. The
+// vessel waits until the estimated stopping distance is less than the remaining height to start the burn
+// but because the stopping distance depends on the angle the vessel has with UP, the engines sometimes need
+// to be stopped or throttled again. 
 //
 // The following parameters are used:
 LOCAL V0v TO 10. // Target velocity for the end of phase 1
@@ -19,7 +24,9 @@ LOCAL Vland TO 1.5. // Land with 2 m/s
 //    body g (TWR_local = 1.5).  
 // 0a. Wait until the angle between down and the engine is XXdeg or less.
 // 0b. Wait until the needed distance to reach V0v is equal to the current altitude-h0, then go full throttle.
-// 1. Keep the trottle so that stopDist = trueRadar-h0 until we reach -V0v.
+// 1. Check if the stopDist is less than 90% the current altitude-h0. In that case throttle off until it
+//    is required to throttle up again. 
+//    Disabled for now: Keep the trottle so that stopDist = trueRadar-h0 until we reach -V0v.
 // 2. Once the vertical speed is V0v adjust the trottle so that vertical speed is -V0v.
 //    When the craft reaches 1m shut the engine off.
 
@@ -66,6 +73,10 @@ LOCK eng2g0 TO VANG(-myforward,-myup).
 
 // Find angle where rocket accel = 1.5*g0
 LOCAL critAng TO ARCCOS(1.5*g_body*SHIP:MASS/SHIP:AVAILABLETHRUST).
+IF critAng < 60 {
+    PRINT "Critical angle "+ROUND(critAng,2)+" < 60deg! Not enough thrust!".
+    PRINT 1/0.
+}
 
 // This is negative for tangential trajectories (orbit)
 LOCAL MaxDecel to SHIP:AVAILABLETHRUST / SHIP:MASS - g_body.
@@ -83,11 +94,11 @@ PRINT "Stop speed:  "+ROUND(V0v,2)+"m/s for phase 1".
 PRINT "Char. time:  "+ROUND(tfin,2)+"s for phase 2".
 PRINT "Height h0:   "+ROUND(h0,2)+"m for phase 2".
 PRINT " ".
-PRINT "Phase 0a:".
+PRINT "Phase 0a: (waiting for critical angle: "+ROUND(critAng,2)+")".
 PRINT "Altitude:    "+ROUND(trueRadar).
 PRINT "Angle:       "+ROUND(eng2g0).
 PRINT " ".
-PRINT "Phase 0b:".
+PRINT "Phase 0b: (waiting for Stopdist <= Altitude-h0)".
 PRINT "Altitude-h0: ".
 PRINT "Stopdist:    ".
 PRINT "Angle:       ".
@@ -121,8 +132,9 @@ UNTIL errorsig < 1 {
 }
 
 // Phase 0a
-// Now wait until the angle is XX deg between g0 and the engine.
-UNTIL eng2g0 < 86 {
+// Now wait until the angle between g0 and the engine is less than our critical angle value.
+// Make sure the STEERING command had a chance to align the ship. This is important when timewrap is used.
+UNTIL eng2g0 < critAng AND VANG(SHIP:FACING:VECTOR,STEERING:VECTOR) <  1 {
     PRINT "Altitude:   "+ROUND(trueRadar)+"      " AT(0,9).
     PRINT "Angle:      "+ROUND(eng2g0)+"                             " AT(0,10).
     WAIT 0.01.
@@ -142,10 +154,6 @@ FUNCTION stopDiThro {
     RETURN (SHIP:VERTICALSPEED^2 - V0v^2) / (2*MaxDecelA*tset). // Include throttle
 }
 
-IF critAng < 60 {
-    PRINT "Critical angle "+ROUND(critAng,2)+" < 60deg! Not enough thrust!".
-    PRINT 1/0.
-}
 
 // Prepare the throttle
 LOCAL tset TO 0.
@@ -153,7 +161,8 @@ LOCK THROTTLE TO tset.
 
 // Phase 0b
 // Wait until the needed distance to reach V0v is just larger than the current altitude-h0
-UNTIL stopDist >= trueRadar-h0 {
+// Make sure the STEERING command had a chance to align the ship. This is important when timewrap is used.
+UNTIL stopDist >= trueRadar-h0 AND VANG(SHIP:FACING:VECTOR,STEERING:VECTOR) <  1 {
     PRINT "Altitude-h0: "+ROUND(trueRadar)+"      " AT(0,13).
     PRINT "Stopdist:    "+ROUND(stopDist)+"      " AT(0,14).
     PRINT "Angle:       "+ROUND(eng2g0)+"      " AT(0,15).
@@ -169,15 +178,23 @@ UNTIL SHIP:VERTICALSPEED >= -V0v {
     SET VSpeed TO SHIP:VERTICALSPEED.
 
     LOCAL sheight TO trueRadar-h0.
-    IF stopDiThro()+5 < sheight { // The 5 is there to make it conservative
-        // Recalculate tset
-        LOCAL newDec TO (SHIP:VERTICALSPEED^2 - V0v^2) / (2*sheight).
-        SET tset TO (newDec+g_body)/(COS(eng2g0)*SHIP:AVAILABLETHRUST / SHIP:MASS).
+    // Needs tuning
+    IF stopDist > sheight {
+        SET tset TO 1.
+    } ELSE IF stopDiThro() < sheight*0.9 {
+        SET tset TO 0.0001. // Off, but Kerbalism doesn't like ignitions.
     }
+    // The part below can be used instead of swtiching the engine on and off. It is less efficient
+    // because it extends the burn time.
+    //ELSE IF stopDiThro()+5 < sheight { // The 5 is there to make it conservative
+    //  // Recalculate tset
+    //  LOCAL newDec TO (SHIP:VERTICALSPEED^2 - V0v^2) / (2*sheight).
+    //  SET tset TO (newDec+g_body)/(COS(eng2g0)*SHIP:AVAILABLETHRUST / SHIP:MASS).
+    //}
     
     PRINT "Altitude-h0: "+ROUND(trueRadar-h0)+"      " AT(0,18).
-    PRINT "Stopdist:    "+ROUND(stopDiThro())+"      " AT(0,19).
-    PRINT "Deltadist:   "+ROUND(sheight-stopDiThro(),2)+"      " AT(0,20).
+    PRINT "Stopdist:    "+ROUND(stopDist)+"      " AT(0,19).
+    PRINT "Deltadist:   "+ROUND(sheight-stopDist,2)+"      " AT(0,20).
     PRINT "Angle:       "+ROUND(eng2g0)+"      " AT(0,21).
     PRINT "VSpeed:      "+ROUND(VSpeed,1)+"      " AT(0,22).
 
