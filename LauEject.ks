@@ -1,4 +1,4 @@
-// LauLAN.ks - Launch into LAN script
+// LauEject.ks - Launch into inclination before ejection script
 // Copyright © 2021 V. Quetschke
 // Version 0.3, 09/21/2021
 @LAZYGLOBAL OFF.
@@ -7,8 +7,8 @@
 
 // Parameters
 DECLARE PARAMETER targetAltkm is 80,
-    targetIncl is 6,
-    lauLAN IS 78.   // Default is Minmus (80, 6, 78)
+    targetIncl is 5,
+    ejectAng IS 90.   // Default
 
 // Load some libraries
 RUNONCEPATH("libcommon").
@@ -22,8 +22,8 @@ IF targetIncl < -180 OR targetIncl > 180 {
     Print 1/0.
 }
 
-IF lauLAN < 0 OR targetIncl > 360 {
-    PRINT "The LAN needs to be between 0 and 360 degrees.".
+IF ejectAng < -180 OR ejectAng > 180 {
+    PRINT "The ejection angle needs to be between -180 and +180 degrees.".
     PRINT " ".
     Print 1/0.
 }
@@ -34,22 +34,11 @@ IF lauLAN < 0 OR targetIncl > 360 {
 // Correct for sidereal day for AN
 LOCAL deg2min TO 21549.25/21600.
 
-// Current global longitude
-//PRINT (SHIP:LONGITUDE+90) + TIME:SECONDS/9203545*360 + MOD(TIME:SECONDS,21600)/60.
-// Current global longitude - kOS version - same value
-//PRINT BODY:ROTATIONANGLE + SHIP:LONGITUDE.
-
-// BODY:ROTATIONANGLE // [0,360)
-// SHIP:LONGITUDE     // [-180,180)
+LOCAL now TO TIME:SECONDS.
 
 // This is deviation in degrees to the AN at the current time.
 // Kerbin rotates 1 deg per minute.
-LOCAL laudeg TO lauLAN - (SHIP:LONGITUDE+90)
-    - TIME:SECONDS/9203545*360
-    - MOD(TIME:SECONDS,21600)/60.
-
-// Alternative version
-//LOCAL laudeg2 TO lauLAN - BODY:ROTATIONANGLE - SHIP:LONGITUDE.
+LOCAL laudeg TO (180+90-SHIP:LONGITUDE) - ejectAng - MOD(now,21600)/60*deg2min.
 
 // Make sure this is positive and between 0 and 360.
 SET laudeg TO MOD(laudeg,360). // This limits laudeg to (-360,360).
@@ -57,6 +46,8 @@ IF laudeg < 0 { SET laudeg TO laudeg+360. }
 
 LOCAL lauminutes TO laudeg*deg2min.
 
+// Find ejection angle from time to launch
+//PRINT (180+90-SHIP:LONGITUDE) - lauminutes/deg2min - MOD(now,21600)/60*deg2min.
 
 LOCAL ANDN TO "AN".
 LOCAL lauIncl TO targetIncl.
@@ -75,9 +66,9 @@ IF lauminutes > 180*21549.25/21600 + lauEarly + 0.5 {
 }
 
 CLEARSCREEN.
-PRINT " Execute launch into LAN script".
+PRINT " Execute launch into ejection angle script".
 PRINT " +------------------------------------------------+ ".
-PRINT " | LAN:                                           | ".
+PRINT " | Ejection angle:                                | ".
 PRINT " | Target Incl.:                                  | ".
 PRINT " | Target orbit:                                  | ".
 PRINT " | Distance to launch:                            | ".
@@ -88,7 +79,7 @@ PRINT " ".
 PRINT " ".
 
 // Fill in static info
-PRINT nuform(lauLAN,4,2)+" deg" at(25,2).
+PRINT nuform(ejectAng,4,2)+" deg" at(25,2).
 PRINT nuform(targetIncl,4,2)+" deg" at(25,3).
 PRINT nuform(targetAltkm,4,2)+" km" at(25,4).
 PRINT nuform(laudeg,4,1)+" deg @ AN" at(25,5).
