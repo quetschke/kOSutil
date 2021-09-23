@@ -325,6 +325,7 @@ PRINT "Set throttle: "+ROUND(TSET,2).
 PRINT " ".
 PRINT "Predicted burn time:       "+nuform(BurnDur,2,2)+"s".
 PRINT "Actual burn time:          "+nuform(EndTime-StartTime+0.25,2,2)+"s".
+PRINT "Burn time ratio:           "+nuform((EndTime-StartTime+0.25)/BurnDur*100,3,2)+"%".
 PRINT " ".
 
 
