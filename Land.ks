@@ -1,6 +1,6 @@
 // land.ks - Land at target
-// Copyright © 2021 V. Quetschke
-// Version 0.3, 09/19/2021
+// Copyright © 2021, 2022 V. Quetschke
+// Version 0.4, 06/22/2022
 @LAZYGLOBAL OFF.
 
 // Script to land on the surface of a body.
@@ -71,15 +71,19 @@ LOCAL g_body TO CONSTANT:G * BODY:MASS / BODY:RADIUS^2.
 // Get the angle between engine and g0.
 LOCK eng2g0 TO VANG(-myforward,-myup).
 
-// Find angle where rocket accel = 1.5*g0
+// Find angle where rocket accel = 1.x*g0. Needs to be larger than 1 otherwise at the critical angle MaxDeclA
+// will be zero.
 LOCAL critAng TO ARCCOS(1.5*g_body*SHIP:MASS/SHIP:AVAILABLETHRUST).
-IF critAng < 60 {
+IF critAng < 45 { // This is arbitrary, check if there are other criteria.
     PRINT "Critical angle "+ROUND(critAng,2)+" < 60deg! Not enough thrust!".
     PRINT 1/0.
 }
 
-// This is negative for tangential trajectories (orbit)
+// This is negative for tangential trajectories (orbit).
 LOCAL MaxDecel to SHIP:AVAILABLETHRUST / SHIP:MASS - g_body.
+
+// TWR with full tanks for current body.
+LOCAL StartTWR to SHIP:AVAILABLETHRUST / SHIP:MASS / g_body.
 
 // Maximum deceleration at current angle
 LOCK MaxDecelA to (COS(eng2g0)*SHIP:AVAILABLETHRUST / SHIP:MASS) - g_body.
@@ -87,9 +91,10 @@ LOCK MaxDecelA to (COS(eng2g0)*SHIP:AVAILABLETHRUST / SHIP:MASS) - g_body.
 // Set up screen output
 CLEARSCREEN.
 PRINT "Distance to ground: "+ROUND(trueRadar,1).
-PRINT "g0 = "+ROUND(g_body,4)+"m/s2 on "+BODY:NAME. // Use this to have the correct value for other bodies.
-PRINT "Max. decel:  "+ROUND(MaxDecel,4)+"m/s2 (at 0deg) in local g: "+ROUND(MaxDecel/g_body,1)+" (negative is bad)".
-PRINT "Crit angle:  "+ROUND(critAng,2)+"deg".
+// Show values for current body.
+PRINT "g0 = "+ROUND(g_body,4)+"m/s2 on "+BODY:NAME+"   TWR: "+ROUND(StartTWR,2).
+PRINT "Max. decel:  "+ROUND(MaxDecel,1)+" m/s2 (at 0deg) in local g: "+ROUND(MaxDecel/g_body,1)+" (negative is bad)".
+PRINT "Crit angle:  "+ROUND(critAng,2)+"deg for 1g dec.".
 PRINT "Stop speed:  "+ROUND(V0v,2)+"m/s for phase 1".
 PRINT "Char. time:  "+ROUND(tfin,2)+"s for phase 2".
 PRINT "Height h0:   "+ROUND(h0,2)+"m for phase 2".
@@ -135,7 +140,7 @@ UNTIL errorsig < 1 {
 // Now wait until the angle between g0 and the engine is less than our critical angle value.
 // Make sure the STEERING command had a chance to align the ship. This is important when timewrap is used.
 UNTIL eng2g0 < critAng AND VANG(SHIP:FACING:VECTOR,STEERING:VECTOR) <  1 {
-    PRINT "Altitude:   "+ROUND(trueRadar)+"      " AT(0,9).
+    PRINT "Altitude:   "+ROUND(trueRadar)+"       " AT(0,9).
     PRINT "Angle:      "+ROUND(eng2g0)+"                             " AT(0,10).
     WAIT 0.01.
 }
