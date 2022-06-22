@@ -1,9 +1,9 @@
 // Launch.ks - Launch script
-// Copyright © 2021 V. Quetschke
-// Version 0.2, 08/25/2021
+// Copyright © 2021, 2022 V. Quetschke
+// Version 0.21, 06/22/2022
 
 DECLARE PARAMETER targetAltkm IS 80,
-    targetIncl IS 0.0.
+    targetIncl IS 0.
 
 // Store current IPU value.
 LOCAL myIPU TO CONFIG:IPU.

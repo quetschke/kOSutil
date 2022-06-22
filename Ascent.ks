@@ -1,6 +1,6 @@
 // Ascent.ks - Ascent script
-// Copyright © 2021 V. Quetschke
-// Version 0.4 - 09/23/2021
+// Copyright © 2021, 2022 V. Quetschke
+// Version 0.41 - 06/22/2022
 @LAZYGLOBAL OFF.
 
 DECLARE PARAMETER
@@ -247,7 +247,7 @@ PRINT " Reached vacuum.".
 
 // Maintain apoapsis.
 LOCK STEERING TO SHIP:PROGRADE. // Go prograde.
-IF SHIP:APOAPSIS < targetAlt {
+IF SHIP:APOAPSIS < targetAlt*0.99 { // Avoid extra initions for Kerbalism!!
     PRINT "Apoapsis correction burn.".
     LOCK THROTTLE TO 0.10.
     WAIT UNTIL SHIP:APOAPSIS > targetAlt.

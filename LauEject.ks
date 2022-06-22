@@ -1,9 +1,14 @@
 // LauEject.ks - Launch into inclination before ejection script
-// Copyright © 2021 V. Quetschke
-// Version 0.3, 09/21/2021
+// Copyright © 2021, 2022 V. Quetschke
+// Version 0.31, 06/22/2022
 @LAZYGLOBAL OFF.
 
-// Launch into target orbit with given LAN. Default setting is Minmus inclination and LAN.
+// Launch into target orbit with ejection angle provided by Transfer Window
+// Planner. See Eve/Moho Flyby Build https://youtu.be/pvl8zILT5Wc?t=1498 for
+// an example.
+// The launch needs to be timed so that the inclined orbit has an AN/DN that is
+// 90 deg away from the ejection point so that the resulting inclination matches
+// the calculated ejection inclination.
 
 // Parameters
 DECLARE PARAMETER targetAltkm is 80,

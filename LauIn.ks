@@ -1,10 +1,10 @@
 // LauIn.ks - Launch in number of minutes script
-// Copyright © 2021 V. Quetschke
-// Version 0.1, 09/21/2021
+// Copyright © 2021, 2022 V. Quetschke
+// Version 0.11, 06/26/2022
 @LAZYGLOBAL OFF.
 
 // Launch into target orbit in given number of minutes, with an optional parameter to launch a given number
-// of minutes early. Default setting is in 5min, with 1 min early launch. The early launch time is to
+// of minutes early. Default setting is in 5min, with 0 min early launch. The early launch time is to
 // for the ascent when aiming for a LAN or ejection angle.
 
 // Note: This scribt needs an external library from:
@@ -104,7 +104,7 @@ PRINT "Stopping Warp ...                         " at (0,11).
 
 // Make sure the warp has stopped
 WAIT UNTIL KUNIVERSE:TIMEWARP:ISSETTLED.
-PRINT "Spare seconds to launch: "+ROUND(lautime - TIME:SECONDS,1).
+PRINT "Spare seconds to launch: "+ROUND(lautime+WarpStopTime-TIME:SECONDS,1).
 
 WAIT UNTIL TIME:SECONDS > lautime.
 PRINT "Warping done.                             " at (0,11).
