@@ -1,6 +1,6 @@
 // xm2.ks - Execute maneuver node script
 // Copyright © 2021 V. Quetschke
-// Version 0.6.6, 09/19/2021
+// Version 0.6.7, 09/25/2021
 @LAZYGLOBAL OFF.
 
 // Store current IPU value.
@@ -21,6 +21,7 @@ LOCAL Node to NEXTNODE.
 
 LOCAL BurnDur TO -1. // Burn time for the delta V.
 LOCAL BurnDur2 TO -1. // Burn time for half the delta V.
+LOCAL TLimit TO 1. // Used to implement throttle limit for short burns
 LOCAL NodedV0 to Node:DELTAV.
 LOCAL BurnDV TO 0. // This should become the same as NodedV0, but pieced together.
 LOCAL sISP TO getISP(). // Current stage ISP
@@ -100,6 +101,7 @@ FROM {local s is 0.} UNTIL s > STAGE:NUMBER STEP {set s to s+1.} DO {
         +nuform(si[s]:dur,5,1).
 }
 
+// This part doesn't use TLimit
 IF Node:BURNVECTOR:MAG < SHIP:STAGEDELTAV(SHIP:STAGENUM):CURRENT {
     PRINT " ".
     PRINT "Single stage maneuver node!".
@@ -164,7 +166,15 @@ IF Node:BURNVECTOR:MAG < SHIP:STAGEDELTAV(SHIP:STAGENUM):CURRENT {
     SET BurnDur TO cumTi.
 }
 //PRINT "NodeDV: "+ROUND(NodedV0:MAG,2)+" BurnDV: "+ROUND(BurnDV,2).
-PRINT "Predicted burn duration: "+ROUND(BurnDur,2)+"s".
+PRINT "Predicted burn duration: "+nuform(BurnDur,3,4)+"s".
+
+// Check for too short burns
+IF BurnDur < 5 {
+    SET TLimit TO BurnDur / 5.
+    SET BurnDur TO BurnDur/TLimit.
+    SET BurnDur2 TO BurnDur2/TLimit.
+    PRINT "Extended burn duration:  "+nuform(BurnDur,3,4)+"s".
+}
 
 // Gets the combined ISP of the currently active engines
 FUNCTION getISP {
@@ -174,6 +184,7 @@ FUNCTION getISP {
     LOCAL consum TO 0.
     FOR eng in eList {
         IF eng:IGNITION {
+            // TLimit cancels out
             SET Fsum TO Fsum + eng:AVAILABLETHRUST.
             SET consum TO consum + eng:AVAILABLETHRUST/eng:ISP.
         }
@@ -187,7 +198,7 @@ FUNCTION getISP {
 }
 
 // Calculate burn time in current stage or maneuver node, and returns the
-// shorter value of the two options. (Calculated for full throttle)
+// shorter value of the two options. (Calculated for full throttle with TLimit)
 FUNCTION BurnTimeC {
     //PARAMETER mNode.
     LOCAL bTime to -1.
@@ -196,12 +207,12 @@ FUNCTION BurnTimeC {
     LOCAL eMass to cMass / (CONSTANT:E^(delV/sISP/CONSTANT:g0)).
     // checking to make sure engines haven't flamed out
     IF (AVAILABLETHRUST > 0) {
-        SET bTime TO (cMass - eMass) * sISP * CONSTANT:g0 / AVAILABLETHRUST.
+        SET bTime TO (cMass - eMass) * sISP * CONSTANT:g0 / AVAILABLETHRUST / TLimit.
     } 
     RETURN bTime.        
 }
 
-// Calculate burn time for given parameters. (Calculated for full throttle)
+// Calculate burn time for given parameters.
 FUNCTION BurnTimeP {
     PARAMETER cmass,    // Start mass
         delV,           // Delta V burned
@@ -251,8 +262,8 @@ WARPTO(NodeTime-BurnDur2-WarpStopTime). // Returns immediately, but warps ...
 
 //staging
 LOCAL stageThrust to MAXTHRUST. // MAXTHRUST updates based on mass and fuel left
-LOCAL cTWR TO AVAILABLETHRUST/SHIP:MASS/CONSTANT:g0.
-PRINT "Stage "+STAGE:NUMBER+" running. Trust: "+round(AVAILABLETHRUST,0)+" kN "+
+LOCAL cTWR TO AVAILABLETHRUST*TLimit/SHIP:MASS/CONSTANT:g0.
+PRINT "Stage "+STAGE:NUMBER+" ready. Trust: "+round(AVAILABLETHRUST*TLimit,0)+" kN "+
       "TWR: "+round(cTWR,2).
 WHEN MAXTHRUST<stageThrust THEN { // No more fuel?
     if runXMN = false
@@ -272,19 +283,19 @@ WHEN MAXTHRUST<stageThrust THEN { // No more fuel?
     LOCK THROTTLE TO 0.
     STAGE.
     UNTIL STAGE:READY { WAIT 0. }
-    SET cTWR TO AVAILABLETHRUST/SHIP:MASS/CONSTANT:g0.
+    SET cTWR TO AVAILABLETHRUST*TLimit/SHIP:MASS/CONSTANT:g0.
     SET sISP TO getISP(). // Current stage ISP
     if MAXTHRUST > 0 {
-        PRINT "Stage "+STAGE:NUMBER+" ignition. Thrust: "+round(AVAILABLETHRUST,2)+" kN  "+
+        PRINT "Stage "+STAGE:NUMBER+" ignition. Thrust: "+round(AVAILABLETHRUST*TLimit,2)+" kN  "+
               "TWR: "+round(cTWR,2).
         SET stageThrust to MAXTHRUST.
         // Allow extended final burn
         IF Node:BURNVECTOR:MAG < STAGE:DELTAV:CURRENT {
             SET CanThrottle TO TRUE.
         }
-        LOCK THROTTLE TO 1.
+        LOCK THROTTLE TO TLimit.
     } ELSE {
-        PRINT "Stage "+STAGE:NUMBER+" no thrust. Thrust: "+round(AVAILABLETHRUST,2)+" kN.".
+        PRINT "Stage "+STAGE:NUMBER+" no thrust. Thrust: "+round(AVAILABLETHRUST*TLimit,2)+" kN.".
     }
     PRINT "              Stage dur.: "+ROUND(TIME:SECONDS-stTime,2).
     RETURN true. 
@@ -293,7 +304,7 @@ WHEN MAXTHRUST<stageThrust THEN { // No more fuel?
 // Wait for alignment and predicted time to start the burn. (Minus a physics cycle.)
 WAIT UNTIL VANG(SHIP:FACING:FOREVECTOR,STEERING) <  1.
 WAIT UNTIL TIME:SECONDS > NodeTime-BurnDur2-0.02.
-LOCK THROTTLE to 1. // Directly after the WAIT command. PRINT takes time!
+LOCK THROTTLE to TLimit. // Directly after the WAIT command. PRINT takes time!
 LOCAL StartTime TO TIME:SECONDS.
 PRINT "Deviation from ignition time: "+ROUND(StartTime-(NodeTime-BurnDur2-0.02),2).
 
@@ -319,13 +330,13 @@ WAIT UNTIL CanThrottle AND BurnTimeC() < 0.25.
 LOCAL EndTime TO TIME:SECONDS.  // Note, this is 1/4 second too early
 
 PRINT "Extend burn to 3s.".
-LOCAL TSET TO BurnTimeC()/3.
+LOCAL TSET TO TLimit*BurnTimeC()/3.
 LOCK THROTTLE TO TSET.
 PRINT "Set throttle: "+ROUND(TSET,2).
 PRINT " ".
 PRINT "Predicted burn time:       "+nuform(BurnDur,2,2)+"s".
-PRINT "Actual burn time:          "+nuform(EndTime-StartTime+0.25,2,2)+"s".
-PRINT "Burn time ratio:           "+nuform((EndTime-StartTime+0.25)/BurnDur*100,3,2)+"%".
+PRINT "Actual burn time:          "+nuform(EndTime-StartTime+0.25,2,2)
+      +"s ("+nuform((EndTime-StartTime+0.25)/BurnDur*100,3,2)+"%)".
 PRINT " ".
 
 
