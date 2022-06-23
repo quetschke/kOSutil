@@ -1,6 +1,6 @@
 // xm2.ks - Execute maneuver node script
-// Copyright © 2021 V. Quetschke
-// Version 0.6.7, 09/25/2021
+// Copyright © 2021, 2022 V. Quetschke
+// Version 0.7.0, 06/22/2022
 @LAZYGLOBAL OFF.
 
 // Store current IPU value.
@@ -254,11 +254,31 @@ WAIT 0.05. // Steeringmanager needs some time to initialize.
 WAIT UNTIL ABS(SteeringManager:ANGLEERROR) + ABS(SteeringManager:ROLLERROR) < 2.
 
 // Warp!
-SET WARPMODE TO "rails".
+SET KUNIVERSE:TIMEWARP:MODE TO "rails".
 PRINT "Warping to maneuver node point" at (0,0).
 LOCAL NodeTime TO Node:TIME.
 PRINT "Warping.                                  " at (0,8).
-WARPTO(NodeTime-BurnDur2-WarpStopTime). // Returns immediately, but warps ...
+
+LOCAL BurnStart TO NodeTime-BurnDur2-WarpStopTime.
+KUNIVERSE:TIMEWARP:WARPTO(BurnStart). // Returns immediately, but warps ...
+
+// Wait for alignment and predicted time to start the burn. (Minus a physics cycle.)
+// Allow 8s plus a correction to get out of a WARP.
+// The 0.53 correction factor was measured, but might change.
+WAIT UNTIL TIME:SECONDS > BurnStart-8-0.525*KUNIVERSE:TIMEWARP:RATE.
+
+// This cancels user initiated wrap mode. This happens for example when aa alarm clock alarm interrupts the
+// WARPTO command from the script and the user starts the warp again manually.
+KUNIVERSE:TIMEWARP:CANCELWARP().
+PRINT "Stopping Warp ...                         " at (0,8).
+
+// Make sure the warp has stopped
+WAIT UNTIL KUNIVERSE:TIMEWARP:ISSETTLED.
+PRINT "Spare seconds to node: "+ROUND(BurnStart+WarpStopTime-TIME:SECONDS,1).
+
+WAIT UNTIL TIME:SECONDS > BurnStart.
+PRINT "Warping done.                             " at (0,8).
+
 
 //staging
 LOCAL stageThrust to MAXTHRUST. // MAXTHRUST updates based on mass and fuel left
@@ -286,6 +306,19 @@ WHEN MAXTHRUST<stageThrust THEN { // No more fuel?
     SET cTWR TO AVAILABLETHRUST*TLimit/SHIP:MASS/CONSTANT:g0.
     SET sISP TO getISP(). // Current stage ISP
     if MAXTHRUST > 0 {
+        // KOS bug
+        IF SHIP:STAGEDELTAV(SHIP:STAGENUM):CURRENT = 0 {
+            PRINT " ".
+            PRINT "KOS STAGE:DELTAV bug. There is thrust but no DV in the current stage!".
+            PRINT "There likely was a stage 0 without function that was removed during".
+            PRINT "staging. Remove that, and try again".
+            PRINT "DV at current stage ("+SHIP:STAGENUM+"): "+SHIP:STAGEDELTAV(SHIP:STAGENUM):CURRENT.
+            PRINT "DV at next stage ("+(SHIP:STAGENUM-1)+"): "+SHIP:STAGEDELTAV(SHIP:STAGENUM-1):CURRENT.
+            PRINT "Abort!".
+            PRINT " ".
+            PRINT " ".
+            SET n TO 1/0.
+        }
         PRINT "Stage "+STAGE:NUMBER+" ignition. Thrust: "+round(AVAILABLETHRUST*TLimit,2)+" kN  "+
               "TWR: "+round(cTWR,2).
         SET stageThrust to MAXTHRUST.
@@ -298,6 +331,8 @@ WHEN MAXTHRUST<stageThrust THEN { // No more fuel?
         PRINT "Stage "+STAGE:NUMBER+" no thrust. Thrust: "+round(AVAILABLETHRUST*TLimit,2)+" kN.".
     }
     PRINT "              Stage dur.: "+ROUND(TIME:SECONDS-stTime,2).
+    //PRINT "BurnTimeC: "+BurnTimeC().
+    //PRINT "STAGE:DELTAV:CURRENT "+STAGE:DELTAV:CURRENT.
     RETURN true. 
 }
 
