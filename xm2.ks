@@ -259,13 +259,13 @@ PRINT "Warping to maneuver node point" at (0,0).
 LOCAL NodeTime TO Node:TIME.
 PRINT "Warping.                                  " at (0,8).
 
-LOCAL BurnStart TO NodeTime-BurnDur2-WarpStopTime.
-KUNIVERSE:TIMEWARP:WARPTO(BurnStart). // Returns immediately, but warps ...
+LOCAL WarpEnd TO NodeTime-BurnDur2-WarpStopTime.  // Time to end of timewarp
+KUNIVERSE:TIMEWARP:WARPTO(WarpEnd). // Returns immediately, but warps ...
 
 // Wait for alignment and predicted time to start the burn. (Minus a physics cycle.)
 // Allow 8s plus a correction to get out of a WARP.
 // The 0.53 correction factor was measured, but might change.
-WAIT UNTIL TIME:SECONDS > BurnStart-8-0.525*KUNIVERSE:TIMEWARP:RATE.
+WAIT UNTIL TIME:SECONDS > WarpEnd-8-0.525*KUNIVERSE:TIMEWARP:RATE.
 
 // This cancels user initiated wrap mode. This happens for example when aa alarm clock alarm interrupts the
 // WARPTO command from the script and the user starts the warp again manually.
@@ -274,9 +274,10 @@ PRINT "Stopping Warp ...                         " at (0,8).
 
 // Make sure the warp has stopped
 WAIT UNTIL KUNIVERSE:TIMEWARP:ISSETTLED.
-PRINT "Spare seconds to node: "+ROUND(BurnStart+WarpStopTime-TIME:SECONDS,1).
+PRINT "Spare seconds to node: "+ROUND(WarpEnd+WarpStopTime-TIME:SECONDS,1).
 
-WAIT UNTIL TIME:SECONDS > BurnStart.
+// This included WarpStopTime spare seconds to align to target direction.
+WAIT UNTIL TIME:SECONDS > WarpEnd.
 PRINT "Warping done.                             " at (0,8).
 
 
