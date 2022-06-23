@@ -1,6 +1,6 @@
 // xm2.ks - Execute maneuver node script
 // Copyright © 2021, 2022 V. Quetschke
-// Version 0.7.0, 06/22/2022
+// Version 0.7.1, 06/22/2022
 @LAZYGLOBAL OFF.
 
 // Store current IPU value.
@@ -149,7 +149,7 @@ IF Node:BURNVECTOR:MAG < SHIP:STAGEDELTAV(SHIP:STAGENUM):CURRENT {
         LOCAL lastDV TO Node:BURNVECTOR:MAG - cumDV.
         SET cumDV TO cumDV + si[s]:VdV.
         //PRINT lastDV.
-        IF cumDV < Node:BURNVECTOR:MAG/2 {
+        IF cumDV < Node:BURNVECTOR:MAG {
             // Not the final stage
             SET cumTi TO cumTi + si[s]:dur + StagingDur.
             SET BurnDV TO cumDV.
@@ -214,14 +214,14 @@ FUNCTION BurnTimeC {
 
 // Calculate burn time for given parameters.
 FUNCTION BurnTimeP {
-    PARAMETER cmass,    // Start mass
+    PARAMETER cMass,    // Start mass
         delV,           // Delta V burned
         myisp,          // For ISP
         thru.           // Thrust
     LOCAL bTime to -1.
-    LOCAL eMass to cMass / (CONSTANT:E^(delV/myisp/CONSTANT:g0)).
     // checking to make sure engines haven't flamed out
-    IF (thru > 0) {
+    IF (thru > 0 and myisp > 0) {
+        LOCAL eMass to cMass / (CONSTANT:E^(delV/myisp/CONSTANT:g0)).
         SET bTime TO (cMass - eMass) * myisp * CONSTANT:g0 / thru.
     } 
     RETURN bTime.        
