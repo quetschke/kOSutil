@@ -26,6 +26,8 @@ SET CONFIG:IPU TO 2000. // Makes the timing a little better.
 RUNONCEPATH("libcommon").
 RUNONCEPATH("lib_num_to_formatted_str").
 
+LOCAL WarpStopTime to 15. //custom value
+
 // Controls triggers
 LOCAL runLauIn to true.
 
@@ -90,12 +92,12 @@ SET KUNIVERSE:TIMEWARP:MODE TO "rails".
 // SET KUNIVERSE:TIMEWARP:RATE TO 1000. // No, done by WARPTO.
 
 PRINT "Warping.                                  " at (0,11).
-KUNIVERSE:TIMEWARP:WARPTO(lautime).
+KUNIVERSE:TIMEWARP:WARPTO(lautime-WarpStopTime).
 
 // Wait for alignment and predicted time to start the burn. (Minus a physics cycle.)
 // Allow 8s plus a correction to get out of a WARP.
 // The 0.53 correction factor was measured, but might change.
-WAIT UNTIL TIME:SECONDS > lautime-8-0.525*KUNIVERSE:TIMEWARP:RATE.
+WAIT UNTIL TIME:SECONDS > lautime-WarpStopTime-8-0.525*KUNIVERSE:TIMEWARP:RATE.
 
 // This cancels user initiated wrap mode. This happens for example when aa alarm clock alarm interrupts the
 // WARPTO command from the script and the user starts the warp again manually.
@@ -104,7 +106,7 @@ PRINT "Stopping Warp ...                         " at (0,11).
 
 // Make sure the warp has stopped
 WAIT UNTIL KUNIVERSE:TIMEWARP:ISSETTLED.
-PRINT "Spare seconds to launch: "+ROUND(lautime+WarpStopTime-TIME:SECONDS,1).
+PRINT "Spare seconds to launch: "+ROUND(lautime-TIME:SECONDS,1).
 
 WAIT UNTIL TIME:SECONDS > lautime.
 PRINT "Warping done.                             " at (0,11).
