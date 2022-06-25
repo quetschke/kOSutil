@@ -4,15 +4,15 @@ Repository with files and utilities for the [kOS mod](https://github.com/KSP-KOS
 ***
 
 ### Table of Contents
-Library to provide extended staging information
+[Library to provide extended staging information](https://github.com/quetschke/kOSutil/edit/main/README.md#library-to-provide-extended-staging-information)
 
-Multi-stage maneuver execution script
+[Multi-stage maneuver execution script](https://github.com/quetschke/kOSutil/edit/main/README.md#multi-stage-maneuver-execution-script)
 
-Automated launch scripts
+[Automated launch scripts](https://github.com/quetschke/kOSutil/edit/main/README.md#automated-launch-scripts)
 
-Script to very precisely set the Orbital Period of a craft
+[Script to very precisely set the Orbital Period of a craft](https://github.com/quetschke/kOSutil/edit/main/README.md#script-to-very-precisely-set-the-orbital-period-of-a-craft)
 
-Other supporting scrips
+[Other supporting scrips](https://github.com/quetschke/kOSutil/edit/main/README.md#other-supporting-scrips)
 
 ***
 
