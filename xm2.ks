@@ -1,12 +1,14 @@
 // xm2.ks - Execute maneuver node script
 // Copyright © 2021, 2022 V. Quetschke
-// Version 0.7.1, 06/22/2022
+// Version 0.7.2, 06/26/2022
 @LAZYGLOBAL OFF.
 
 // Store current IPU value.
 LOCAL myIPU TO CONFIG:IPU.
 SET CONFIG:IPU TO 2000. // Makes the timing a little better.
 // SET TERMINAL:HEIGHT TO 38. // Height to fit screen output. 
+
+// The xm2 scrip uses RCS if it is availabel. It does not enable or disable the RCS status.
 
 RUNONCEPATH("libcommon").
 
@@ -244,7 +246,8 @@ WHEN defined runXMN then {
     RETURN runXMN.  // Removes the trigger when runXMN is false
 }
 
-RCS ON. SAS OFF.
+//RCS ON.
+SAS OFF.
 LOCK THROTTLE TO 0.
 LOCK STEERING TO Node:DELTAV.
 
@@ -384,7 +387,8 @@ WAIT UNTIL VDOT(NodedV0, Node:DELTAV) < 0.
 LOCK THROTTLE TO 0.
 PRINT "Burn completed!".
 
-RCS OFF. SAS ON.
+//RCS OFF.
+SAS ON.
 UNLOCK STEERING.
 LOCK THROTTLE TO 0. UNLOCK THROTTLE.
 SET runXMN TO FALSE.
