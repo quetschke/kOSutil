@@ -1,6 +1,6 @@
 // land.ks - Land at target
 // Copyright © 2021, 2022 V. Quetschke
-// Version 0.6, 07/09/2022
+// Version 0.7, 08/07/2022
 @LAZYGLOBAL OFF.
 
 // Script to land on the surface of a body.
@@ -36,6 +36,16 @@ IF h0 < 15 {
 }
 LOCAL Vland TO 0.5. // Land with 0.5 m/s
 
+// We will land burning retrograde plus small adjustments in pitch and yaw to steer the landing spot.
+LOCAL pAng TO 0.
+LOCAL yAng TO 0.
+LOCAL maxAng TO 10. // Maximum correction angle
+LOCAL ImpDR TO 0. // Overshoot from WP
+LOCAL ImpLeft TO 0. // Left from WP
+
+ // Roll correction to avoid rolling the rocket when launched. The value is calclated below.
+LOCAL rollCorrection TO 0. // Calculated below, based on TopBearing
+
 // The intention is to achieve a landing where V0v is reached at h0. Then the craft is decelerated to
 // Vland to softly touch down.
 // The script approaches the ground in the following phases
@@ -56,7 +66,7 @@ CLEARSCREEN.
 PRINT " ".
 PRINT "Executing land script ...".
 PRINT "landRot:"+nuform(landRot,5,1)+" deg".
-PRINT "WPpara: "+nuform(landRot,5,1).
+PRINT "WPpara: "+WPpara.
 PRINT " ".
 
 // Trajectories
@@ -73,8 +83,10 @@ IF ADDONS:TR:AVAILABLE {
 
 // Find angle where rocket accel = 1.5*g0. Needs to be larger than 1 otherwise at the critical angle MaxDeclA
 // will be zero.
-// Todo: Use fixed deceleration minimum including g_body.
-LOCAL critAng TO ARCCOS(1.5*g_body*SHIP:MASS/SHIP:AVAILABLETHRUST).
+LOCK critAng TO ARCCOS(1.5*g_body*SHIP:MASS/SHIP:AVAILABLETHRUST).
+if critAng + maxAng > 89.5 { // Avoid MaxDeclA problems.
+    SET critAng TO 89.5 - maxAng.
+}
 IF critAng < 45 { // This is arbitrary, check if there are other criteria.
     PRINT "Critical angle "+ROUND(critAng,2)+" < 45deg! Not enough thrust!".
     PRINT 1/0.
@@ -164,20 +176,11 @@ IF HASNODE {
 //RCS ON.
 SAS OFF.
 
-// We will land burning retrograde plus small adjustments in pitch and yaw to steer the landing spot.
-LOCAL pAng TO 0.
-LOCAL yAng TO 0.
-LOCAL ImpDR TO 0. // Overshoot from WP
-LOCAL ImpLeft TO 0. // Left from WP
-
- // Roll correction to avoid rolling the rocket when launched. The value is calclated below.
-LOCAL rollCorrection TO 0. // Calculated below, based on TopBearing
-
 // Functions and LOCKs
 
 // Wait until we point in the target direction.
 FUNCTION waitSteer {
-    LOCAL errorsig TO ABS(SteeringManager:ANGLEERROR) + ABS(SteeringManager:ROLLERROR).
+    LOCAL errorsig TO ABS(SteeringManager:ANGLEERROR) + ABS(SteeringManager:ROLLERROR) + 5. // Initialize to non zero
     LOCAL k TO 1/6. // EMA parameter, to avoid overshooting look at average.
     UNTIL errorsig < 3 {
         WAIT 0.1.
@@ -293,7 +296,7 @@ LOCK trueRadar TO bounds_box:BOTTOMALTRADAR + 0.5. // Some spare height.
 
 // Get the angle between engine and g0. This uses the planned direction
 // without pich and yaw corrections and not the actual vessel orientation.
-LOCK eng2g0 TO VANG(-SHIP:SRFRETROGRADE:VECTOR,-myup).
+LOCK eng2g0 TO VANG(-SHIP:SRFRETROGRADE:VECTOR,-myup) + SQRT(pAng^2+yAng^2). // Explain!!!
 
 // This is negative for tangential trajectories (orbit).
 LOCAL MaxDecel to SHIP:AVAILABLETHRUST / SHIP:MASS - g_body.
@@ -323,7 +326,7 @@ PRINT "Landing burn script".
 // Show values for current body.
 PRINT "g0 = "+ROUND(g_body,4)+"m/s2 on "+BODY:NAME+"   TWR_body: "+ROUND(StartTWR,2).
 PRINT "Max. decel:  "+ROUND(MaxDecel,1)+" m/s2 (at 0deg) in local g: "+ROUND(MaxDecel/g_body,1)+" (negative is bad)".
-PRINT "Crit angle:  "+ROUND(critAng,2)+"deg for 1g dec.".
+PRINT "Crit angle:  "+ROUND(critAng,2)+"deg for 0.5g dec.".
 PRINT "Stop speed:  "+ROUND(V0v,2)+"m/s for phase 1".
 PRINT "Char. time:  "+ROUND(tfin,2)+"s for phase 2".
 PRINT "Height h0:   "+ROUND(h0,2)+"m for phase 2".
@@ -333,7 +336,7 @@ PRINT " ".
 PRINT "Phase 0a: (waiting for critical angle: "+ROUND(critAng,2)+")".
 PRINT " ".
 PRINT " ".
-PRINT "Phase 0b: (waiting for Stopdist <= Altitude-h0)".
+PRINT "Phase 0b: (waiting for Stopdist >= Altitude-h0)".
 PRINT "Stopdist:    ".
 PRINT " ".
 PRINT "Phase 1:".
@@ -361,6 +364,7 @@ LOCAL runLA TO TRUE.
 LOCAL tarDiff TO V(0,0,0). // Starts with zero vector.
 LOCAL d_ema TO 1/25. // 0.5s
 
+// TODO: Move text that doesn't change out of the trigger below.
 WHEN defined runLA then {
     PRINT ROUND(eng2g0)+"deg ("+ROUND(VANG(SHIP:FACING:VECTOR,STEERING:VECTOR))+" deg) deviation    " AT(13,7).
     PRINT ROUND(trueRadar-h0)+"m      " AT(13,8).
@@ -377,14 +381,16 @@ WHEN defined runLA then {
         SET tarDiff TO tarDiff*d_ema + (ADDONS:TR:IMPACTPOS:POSITION - myWP:POSITION)*(1-d_ema).
         PRINT "WP to Imp:   "+ROUND(tarDiff:MAG)+"m     " AT (0,28).
         // Calculate and share with Phase 2
-        LOCAL ImpCorr TO ImpDist*(1-1/1.16).  // Fudge factor, see DecelPlot.m 1.18 for TWR 2.5
+        LOCAL ImpCorr TO ImpDist*(1-1/1.16).  // Fudge factor, see DecelPlot.m 1.16 for TWR 2.5
+        //LOCAL ImpCorr TO ImpDist*(1-1/1.04).  // Fudge factor, see DecelPlot.m 1.04 for TWR 7.5
+        //LOCAL ImpCorr TO 0.  // Fudge factor, off
         SET ImpDR TO VDOT(tarDiff,myImpDir)-ImpCorr.
         SET ImpLeft TO VDOT(tarDiff,myImpLeft).
-        PRINT "Downrange:   "+ROUND(ImpDR)+"m     " AT (0,29).
-        PRINT "Left:        "+ROUND(ImpLeft)+"m     " AT (0,30).
+        PRINT "Downrange:   "+ROUND(ImpDR)+"m  pAng: "+ROUND(pAng,1)+"     " AT (0,29).
+        PRINT "Left:        "+ROUND(ImpLeft)+"m  yAng: "+ROUND(yAng,1)+"     " AT (0,30).
         PRINT "TR:          "+ADDONS:TR:HASIMPACT+"     " AT (0,31).
-    } ELSE {
-        PRINT "Dist:        "+ROUND(ADDONS:TR:IMPACTPOS:POSITION:MAG)+"m   Horiz: "
+    } ELSE IF ADDONS:TR:HASIMPACT {
+        PRINT "Impact dist: "+ROUND(ADDONS:TR:IMPACTPOS:POSITION:MAG)+"m   Horiz: "
             +ROUND(VDOT(ADDONS:TR:IMPACTPOS:POSITION,myImpDir),1)+"m     " AT (0,27).
     }
     PRINT ROUND((TIME:SECONDS-loopTime)*1000,1)+"   " AT (22,0).
@@ -414,6 +420,14 @@ PRINT "             Vessel alignment completed." AT(0,11).
 // Convert into a function?
 LOCK stopDist TO (SHIP:VERTICALSPEED^2 - V0v^2) / (2*MaxDecelA). // MaxDecelA includes current set orientation.
 
+// Abort if we cannot stop anymore.
+IF stopDist >= (trueRadar-h0)*0.85 {
+    PRINT "Not enough thrust to stop before hitting the ground. Abort!".
+    PRINT "Altitude-h0: "+ROUND(trueRadar-h0)+" m".
+    PRINT "Stopdist:    "+ROUND(stopDist)+" m".
+    PRINT 1/0.
+}
+
 // To estimate downrange distance. Positive direction points down, g points down, but
 // MaxDecelA should be negative in this frame (add a -). Also -(-v0) as down is positive.
 // Expensive call ...
@@ -434,7 +448,13 @@ LOCK THROTTLE TO tset.
 // Wait until the needed distance to reach V0v is just larger than the current altitude-h0
 // Make sure the STEERING command had a chance to align the ship. This is important when timewrap is used.
 LOCAL haltwarp TO FALSE.
-UNTIL stopDist >= trueRadar-h0 {
+LOCAL cancelwarp TO FALSE.
+IF useWP {
+     // Assume max correction for waypoint landings. Otherwise stopDist undercounts becaude of steering.
+    SET pAng TO maxAng.
+}
+PRINT "Stopdist:    "+ROUND(stopDist)+"m T:"+ROUND(stopTime)+"s      " AT(0,14).
+UNTIL stopDist >= (trueRadar-h0)*0.99 { // Safety margin
     LOCAL sheight TO trueRadar-h0.
 
     // Check and stop WARP
@@ -446,8 +466,13 @@ UNTIL stopDist >= trueRadar-h0 {
         }
         WAIT 0.01.
     }
-    IF KUNIVERSE:TIMEWARP:RATE > 1 AND stopDist > sheight/1.2 {
+    IF KUNIVERSE:TIMEWARP:RATE > 1 AND stopDist > sheight/1.4 {
         KUNIVERSE:TIMEWARP:CANCELWARP().
+        IF cancelwarp = FALSE {
+            PRINT "Cancel WARP.".
+            SET cancelwarp TO TRUE.
+        }
+        WAIT 0.01.
     }
 
     //PRINT "Stopdist:    "+ROUND(stopDist)+"      " AT(0,14).
@@ -455,7 +480,6 @@ UNTIL stopDist >= trueRadar-h0 {
     WAIT 0.01.
 }
 LOCAL burnStart IS TIME:SECONDS.
-
 
 // Roll to correct for the top to face north plus possible extra rotation. Plus 90 = east.
 // Do again here, before the final landing burn.
@@ -472,26 +496,22 @@ UNTIL SHIP:VERTICALSPEED >= -V0v {
     LOCAL sheight TO trueRadar-h0.
     
     // ImpLeft positive need negatve yaw to correct
-    LOCAL yLimit TO MIN((trueRadar-h0)/100, 15).
-    //IF ABS(ImpLeft) > 1 {
-        IF ABS(-ImpLeft/10) > yLimit {
-            SET yAng TO CHOOSE -yLimit IF ImpLeft > 0 ELSE yLimit.
-        } ELSE {
-            SET yAng TO -ImpLeft/10.
-        }
-    //} ELSE {
-    //    SET yAng TO 0. 
-    //}
+    LOCAL yLimit TO MIN((trueRadar-h0)/100, maxAng).
+    IF ABS(-ImpLeft/10) > yLimit {
+        SET yAng TO CHOOSE -yLimit IF ImpLeft > 0 ELSE yLimit.
+    } ELSE {
+        SET yAng TO -ImpLeft/10.
+    }
     // ImpDR positive need negative pitch to correct
-    LOCAL pLimit TO MIN((trueRadar-h0)/20, 10).
-    IF ABS(-ImpDR/3) > yLimit {
+    LOCAL pLimit TO MIN((trueRadar-h0)/20, maxAng*0.66).
+    IF ABS(-ImpDR/3) > pLimit {
         SET pAng TO CHOOSE -pLimit IF ImpDR > 0 ELSE pLimit.
     } ELSE {
         SET pAng TO -ImpDR/3.
     }
 
     // Needs tuning
-    IF stopDist > sheight {
+    IF stopDist > sheight*0.99 { // 99% to have a small safety margin.
         SET tset TO 1.
     } ELSE IF stopDiThro() < sheight*0.9 {
         SET tset TO 0.0001. // Off, but Kerbalism doesn't like ignitions.
@@ -519,7 +539,7 @@ SET pAng TO 0.
 
 // Phase 2
 // Keep the trottle so that vertical speed is -Vland (-0.5 m/s)
-UNTIL trueRadar < 1 {
+UNTIL trueRadar < 0.5 {
     SET VSpeed TO SHIP:VERTICALSPEED.  // Moving up = positive vertical speed.
 
     // Calculate target deceleration based on v=g*t with 0.5s time constant.

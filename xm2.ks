@@ -12,7 +12,7 @@ SET CONFIG:IPU TO 2000. // Makes the timing a little better.
 
 RUNONCEPATH("libcommon").
 
-LOCAL WarpStopTime to 15. //custom value
+LOCAL WarpStopTime to 4. //custom value
 
 // Time it takes to complete staging event. The time was measured and add 1/2 cycle added. Somehow the
 // program is off for longer burns. Might depend on engine, burn duration or simulation load.
@@ -342,6 +342,11 @@ WHEN MAXTHRUST<stageThrust THEN { // No more fuel?
 
 // Wait for alignment and predicted time to start the burn. (Minus a physics cycle.)
 WAIT UNTIL VANG(SHIP:FACING:FOREVECTOR,STEERING) <  1.
+IF TIME:SECONDS > NodeTime-BurnDur2-0.02 {
+    PRINT "Alignment took too long! Consider increasing WarpStopTime".
+    PRINT "  Missed burn begin by: "+ROUND(TIME:SECONDS - (NodeTime-BurnDur2-0.02),2)+"s".
+}
+
 WAIT UNTIL TIME:SECONDS > NodeTime-BurnDur2-0.02.
 LOCK THROTTLE to TLimit. // Directly after the WAIT command. PRINT takes time!
 LOCAL StartTime TO TIME:SECONDS.
