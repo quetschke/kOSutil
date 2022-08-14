@@ -28,11 +28,11 @@ LOCAL g_body TO CONSTANT:G * BODY:MASS / BODY:RADIUS^2.
 // The following parameters are used:
 LOCAL V0v TO 10. // Target velocity for the end of phase 1
 LOCAL tfin TO 5. // Characteristic time for final phase
-// Final phase height. Assume we only have g/4 thrust to decellerate (including local gravity).
-LOCAL h0 TO V0v*tfin - (g_Kerbin/4)/2*tfin^2.
-IF h0 < 15 {
-    PRINT "Very short phase 2 - please check!".
-    PRINT 1/0.
+// Final phase height. Assume we MaxDecel thrust to decellerate (including local gravity).
+LOCAL MaxDecel to SHIP:AVAILABLETHRUST / SHIP:MASS - g_body.
+LOCAL h0 TO V0v*tfin - (MaxDecel)/2*tfin^2.
+IF h0 < 5 {
+    SET h0 TO 10. // Very high TWRs will make h0 too small or negative.
 }
 LOCAL Vland TO 0.5. // Land with 0.5 m/s
 
@@ -84,9 +84,6 @@ IF ADDONS:TR:AVAILABLE {
 // Find angle where rocket accel = 1.5*g0. Needs to be larger than 1 otherwise at the critical angle MaxDeclA
 // will be zero.
 LOCK critAng TO ARCCOS(1.5*g_body*SHIP:MASS/SHIP:AVAILABLETHRUST).
-if critAng + maxAng > 89.5 { // Avoid MaxDeclA problems.
-    SET critAng TO 89.5 - maxAng.
-}
 IF critAng < 45 { // This is arbitrary, check if there are other criteria.
     PRINT "Critical angle "+ROUND(critAng,2)+" < 45deg! Not enough thrust!".
     PRINT 1/0.
@@ -291,15 +288,27 @@ FUNCTION TopBearingA {
 
 // Enhanced altimeter
 LOCAL bounds_box IS SHIP:BOUNDS. // IMPORTANT! do this up front, not in the loop.
-// TODO: Use terrainheight at WP?
-LOCK trueRadar TO bounds_box:BOTTOMALTRADAR + 0.5. // Some spare height.
+// Distance of center to bottom
+LOCAL cheight IS VDOT(-SHIP:FACING:VECTOR, bounds_box:FURTHESTCORNER(-SHIP:FACING:VECTOR)).
+
+// TODO: Use terrainheight at impact?
+FUNCTION trueRadar {
+    // Annoying: bounds_box:BOTTOMALTRADAR and also SHIP:ALTITUDE - SHIP:GEOPOSITION:TERRAINHEIGHT
+    // switched to (about) 0 at a few hundred meeters above Minmus. ALT:RADAR always worked, but was
+    // only accurate below 10000m. Workaround:
+    IF SHIP:ALTITUDE < 10000 {
+        RETURN ALT:RADAR + 0.5 - cheight.
+    } ELSE {
+        RETURN bounds_box:BOTTOMALTRADAR + 0.5. // Some spare height.
+    }
+}
+LOCK trueRadar2 TO bounds_box:BOTTOMALTRADAR + 0.5. // Some spare height.
+//LOCK trueRadar2 TO SHIP:ALTITUDE - SHIP:GEOPOSITION:TERRAINHEIGHT.
+//LOCK trueRadar2 TO ALT:RADAR + 0.5 + cheight.
 
 // Get the angle between engine and g0. This uses the planned direction
 // without pich and yaw corrections and not the actual vessel orientation.
 LOCK eng2g0 TO VANG(-SHIP:SRFRETROGRADE:VECTOR,-myup) + SQRT(pAng^2+yAng^2). // Explain!!!
-
-// This is negative for tangential trajectories (orbit).
-LOCAL MaxDecel to SHIP:AVAILABLETHRUST / SHIP:MASS - g_body.
 
 // TWR with full tanks for current body.
 LOCAL StartTWR to SHIP:AVAILABLETHRUST / SHIP:MASS / g_body.
@@ -362,12 +371,13 @@ LOCAL loopTime IS TIME:SECONDS.
 LOCAL runLA TO TRUE.
 // EMA on diff vector. Is this needed? TR jumps somewhat.
 LOCAL tarDiff TO V(0,0,0). // Starts with zero vector.
-LOCAL d_ema TO 1/25. // 0.5s
+//LOCAL d_ema TO 1/25. // 0.5s
 
 // TODO: Move text that doesn't change out of the trigger below.
 WHEN defined runLA then {
     PRINT ROUND(eng2g0)+"deg ("+ROUND(VANG(SHIP:FACING:VECTOR,STEERING:VECTOR))+" deg) deviation    " AT(13,7).
-    PRINT ROUND(trueRadar-h0)+"m      " AT(13,8).
+    PRINT ROUND(trueRadar,1)+"m  " AT(13,8).
+    PRINT ROUND(trueRadar2,1)+"m  " AT(22,8).
     PRINT "Bearing: "+ROUND(TopBearingA(),1)+"deg   " AT(40,7).
     PRINT "Cur. max decel: "+ROUND(MaxDecelA,1)+"m/s2     " AT(40,3).
     
@@ -378,16 +388,19 @@ WHEN defined runLA then {
         LOCAL ImpDist TO VDOT(myWP:POSITION,myImpDir).  // Distance to TR impact
         PRINT "Dist:        "+ROUND(myWP:POSITION:MAG)+"m   Horiz: "+ROUND(ImpDist,1)+"m     " AT (0,27).
         // EMA for difference vector.
-        SET tarDiff TO tarDiff*d_ema + (ADDONS:TR:IMPACTPOS:POSITION - myWP:POSITION)*(1-d_ema).
-        PRINT "WP to Imp:   "+ROUND(tarDiff:MAG)+"m     " AT (0,28).
-        // Calculate and share with Phase 2
-        LOCAL ImpCorr TO ImpDist*(1-1/1.16).  // Fudge factor, see DecelPlot.m 1.16 for TWR 2.5
-        //LOCAL ImpCorr TO ImpDist*(1-1/1.04).  // Fudge factor, see DecelPlot.m 1.04 for TWR 7.5
-        //LOCAL ImpCorr TO 0.  // Fudge factor, off
-        SET ImpDR TO VDOT(tarDiff,myImpDir)-ImpCorr.
-        SET ImpLeft TO VDOT(tarDiff,myImpLeft).
-        PRINT "Downrange:   "+ROUND(ImpDR)+"m  pAng: "+ROUND(pAng,1)+"     " AT (0,29).
-        PRINT "Left:        "+ROUND(ImpLeft)+"m  yAng: "+ROUND(yAng,1)+"     " AT (0,30).
+        //SET tarDiff TO tarDiff*d_ema + (ADDONS:TR:IMPACTPOS:POSITION - myWP:POSITION)*(1-d_ema).
+        IF ADDONS:TR:HASIMPACT {
+            SET tarDiff TO ADDONS:TR:IMPACTPOS:POSITION - myWP:POSITION.
+            PRINT "WP to Imp:   "+ROUND(tarDiff:MAG)+"m     " AT (0,28).
+            // Calculate and share with Phase 2
+            //LOCAL ImpCorr TO ImpDist*(1-1/1.16).  // Fudge factor, see DecelPlot.m 1.16 for TWR 2.5
+            //LOCAL ImpCorr TO ImpDist*(1-1/1.04).  // Fudge factor, see DecelPlot.m 1.04 for TWR 7.5
+            LOCAL ImpCorr TO 0.  // Fudge factor, off
+            SET ImpDR TO VDOT(tarDiff,myImpDir)-ImpCorr.
+            SET ImpLeft TO VDOT(tarDiff,myImpLeft).
+            PRINT "Downrange:   "+ROUND(ImpDR)+"m  pAng: "+ROUND(pAng,1)+"     " AT (0,29).
+            PRINT "Left:        "+ROUND(ImpLeft)+"m  yAng: "+ROUND(yAng,1)+"     " AT (0,30).
+        }
         PRINT "TR:          "+ADDONS:TR:HASIMPACT+"     " AT (0,31).
     } ELSE IF ADDONS:TR:HASIMPACT {
         PRINT "Impact dist: "+ROUND(ADDONS:TR:IMPACTPOS:POSITION:MAG)+"m   Horiz: "
@@ -401,7 +414,7 @@ WHEN defined runLA then {
 // Phase 0a
 // Now wait until the angle between g0 and the engine is less than our critical angle value.
 // Make sure the STEERING command had a chance to align the ship. This is important when timewrap is used.
-UNTIL eng2g0 < critAng {
+UNTIL eng2g0 < MIN(45+maxAng*SQRT(2), critAng+maxAng*SQRT(2)) {
     WAIT 0.01.
 }
 PRINT "Phase 0a: (waiting for critical angle: "+ROUND(critAng,2)+") - done" AT(0,10).
@@ -545,9 +558,9 @@ UNTIL trueRadar < 0.5 {
     // Calculate target deceleration based on v=g*t with 0.5s time constant.
     LOCAL newDec TO (-VSpeed-Vland)/0.5. // 0.5s time constant
     SET tset TO (newDec+g_body)/(COS(eng2g0)*SHIP:AVAILABLETHRUST / SHIP:MASS).
-    PRINT "Altitude:    "+ROUND(trueRadar)+"      " AT(0,22).
+    PRINT "Altitude:    "+ROUND(trueRadar,1)+"      " AT(0,22).
     PRINT "Throttle:    "+ROUND(tset,3)+"      " AT(0,23).
-    PRINT "VSpeed:      "+ROUND(VSpeed,1)+"      " AT(0,24).
+    PRINT "VSpeed:      "+ROUND(VSpeed,2)+"      " AT(0,24).
 }
 SET tset TO 0.
 
