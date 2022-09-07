@@ -1,6 +1,6 @@
 // Align.ks - Align the craft for solar panel exposure
-// Copyright © 2021 M. Aben, V. Quetschke
-// Version 0.2, 09/19/2021
+// Copyright © 2021, 2022 M. Aben, V. Quetschke
+// Version 0.3, 06/26/2022
 //
 // This script is based on a version from Mike Aben in https://github.com/MikeAben64/kOS-Scripts .
 // https://github.com/MikeAben64/kOS-Scripts/blob/main/align.ks
@@ -9,14 +9,16 @@
 
 // DESCRIPTION:
 // Orients vessel for ideal solar panel exposure.
-// Take a parameter for the orientation of
-// solar panels: ('n' - normal, 'd' - dorsal, 'w' - wing (dorsal+90deg))
+// Take a parameter for the orientation of the vessel:
+//  'n' - normal, nose up
+//  'd' - dorsal, top up
+//  'w' - wing, right side up (dorsal+90deg))
 // The program watits for minimal deviation from the value set vor steering using an eponential moving
 // or can be exited through pressing 'delete'.
 
 // ***Parameter***
 // Orientation of solar panels
-PARAMETER orientation.
+PARAMETER orientation IS "n".
 
 main().
 
