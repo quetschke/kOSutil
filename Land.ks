@@ -1,6 +1,6 @@
 // land.ks - Land at target
 // Copyright © 2021, 2022 V. Quetschke
-// Version 0.7, 08/07/2022
+// Version 0.8, 10/17/2022
 @LAZYGLOBAL OFF.
 
 // Script to land on the surface of a body.
@@ -31,8 +31,8 @@ LOCAL tfin TO 5. // Characteristic time for final phase
 // Final phase height. Assume we MaxDecel thrust to decellerate (including local gravity).
 LOCAL MaxDecel to SHIP:AVAILABLETHRUST / SHIP:MASS - g_body.
 LOCAL h0 TO V0v*tfin - (MaxDecel)/2*tfin^2.
-IF h0 < 5 {
-    SET h0 TO 10. // Very high TWRs will make h0 too small or negative.
+IF h0 < 12 {
+    SET h0 TO 12. // Very high TWRs will make h0 too small or negative.
 }
 LOCAL Vland TO 0.5. // Land with 0.5 m/s
 
@@ -295,14 +295,14 @@ LOCAL cheight IS VDOT(-SHIP:FACING:VECTOR, bounds_box:FURTHESTCORNER(-SHIP:FACIN
 FUNCTION trueRadar {
     // Annoying: bounds_box:BOTTOMALTRADAR and also SHIP:ALTITUDE - SHIP:GEOPOSITION:TERRAINHEIGHT
     // switched to (about) 0 at a few hundred meeters above Minmus. ALT:RADAR always worked, but was
-    // only accurate below 10000m. Workaround:
-    IF SHIP:ALTITUDE < 10000 {
-        RETURN ALT:RADAR + 0.5 - cheight.
+    // only accurate below 10000m. 5000m on the Mun? Workaround:
+    IF SHIP:ALTITUDE < 5000 {
+        RETURN ALT:RADAR - cheight - 0.5. // This seems to still be too high. Subtract 50cm
     } ELSE {
-        RETURN bounds_box:BOTTOMALTRADAR + 0.5. // Some spare height.
+        RETURN bounds_box:BOTTOMALTRADAR. // Some spare height.
     }
 }
-LOCK trueRadar2 TO bounds_box:BOTTOMALTRADAR + 0.5. // Some spare height.
+LOCK trueRadar2 TO bounds_box:BOTTOMALTRADAR. // For comparison.
 //LOCK trueRadar2 TO SHIP:ALTITUDE - SHIP:GEOPOSITION:TERRAINHEIGHT.
 //LOCK trueRadar2 TO ALT:RADAR + 0.5 + cheight.
 
@@ -539,20 +539,20 @@ UNTIL SHIP:VERTICALSPEED >= -V0v {
     
     //PRINT "Stopdist:    "+ROUND(stopDist)+"      " AT(0,17).
     PRINT "Stopdist:    "+ROUND(stopDist)+"m T:"+ROUND(stopTime)+"s      " AT(0,17).
-    PRINT "Deltadist:   "+ROUND(sheight-stopDist,2)+"      " AT(0,18).
+    PRINT "Deltadist:   "+ROUND(sheight-stopDist,2)+" to h0 " AT(0,18).
     PRINT "VSpeed:      "+ROUND(VSpeed,1)+"      " AT(0,19).
 
     WAIT 0.01.
 }
 
 // Deploy landing legs
-SET GEAR TO True.
+SET GEAR TO True. // Attention, this changes cheight!
 SET yAng TO 0.
 SET pAng TO 0.
 
 // Phase 2
 // Keep the trottle so that vertical speed is -Vland (-0.5 m/s)
-UNTIL trueRadar < 0.5 {
+UNTIL trueRadar < 1.5 {
     SET VSpeed TO SHIP:VERTICALSPEED.  // Moving up = positive vertical speed.
 
     // Calculate target deceleration based on v=g*t with 0.5s time constant.
