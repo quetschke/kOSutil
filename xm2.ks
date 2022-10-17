@@ -1,15 +1,16 @@
 // xm2.ks - Execute maneuver node script
 // Copyright © 2021, 2022 V. Quetschke
-// Version 0.7.2, 06/26/2022
+// Version 0.7.3, 10/12/2022
 @LAZYGLOBAL OFF.
 
 // Store current IPU value.
 LOCAL myIPU TO CONFIG:IPU.
 SET CONFIG:IPU TO 2000. // Makes the timing a little better.
-// SET TERMINAL:HEIGHT TO 38. // Height to fit screen output. 
+// SET TERMINAL:HEIGHT TO 38. // Height to fit screen output.
 
 // The xm2 scrip uses RCS if it is availabel. It does not enable or disable the RCS status.
 
+SET THROTTLE TO 0. // Making sure throttle is off
 RUNONCEPATH("libcommon").
 
 LOCAL WarpStopTime to 4. //custom value
@@ -210,8 +211,8 @@ FUNCTION BurnTimeC {
     // checking to make sure engines haven't flamed out
     IF (AVAILABLETHRUST > 0) {
         SET bTime TO (cMass - eMass) * sISP * CONSTANT:g0 / AVAILABLETHRUST / TLimit.
-    } 
-    RETURN bTime.        
+    }
+    RETURN bTime.
 }
 
 // Calculate burn time for given parameters.
@@ -225,8 +226,8 @@ FUNCTION BurnTimeP {
     IF (thru > 0 and myisp > 0) {
         LOCAL eMass to cMass / (CONSTANT:E^(delV/myisp/CONSTANT:g0)).
         SET bTime TO (cMass - eMass) * myisp * CONSTANT:g0 / thru.
-    } 
-    RETURN bTime.        
+    }
+    RETURN bTime.
 }
 
 
@@ -265,6 +266,9 @@ PRINT "Warping.                                  " at (0,8).
 LOCAL WarpEnd TO NodeTime-BurnDur2-WarpStopTime.  // Time to end of timewarp
 KUNIVERSE:TIMEWARP:WARPTO(WarpEnd). // Returns immediately, but warps ...
 
+// TODO: Better warp stopping. Something like:
+// See lauIN.ks
+
 // Wait for alignment and predicted time to start the burn. (Minus a physics cycle.)
 // Allow 8s plus a correction to get out of a WARP.
 // The 0.53 correction factor was measured, but might change.
@@ -291,7 +295,7 @@ PRINT "Stage "+STAGE:NUMBER+" ready. Trust: "+round(AVAILABLETHRUST*TLimit,0)+" 
       "TWR: "+round(cTWR,2).
 WHEN MAXTHRUST<stageThrust THEN { // No more fuel?
     if runXMN = false
-        RETURN false. 
+        RETURN false.
     // If there are no stages left we have a problem!
     SET CanThrottle TO FALSE.
     LOCAL stTime IS TIME:SECONDS.
@@ -337,7 +341,7 @@ WHEN MAXTHRUST<stageThrust THEN { // No more fuel?
     PRINT "              Stage dur.: "+ROUND(TIME:SECONDS-stTime,2).
     //PRINT "BurnTimeC: "+BurnTimeC().
     //PRINT "STAGE:DELTAV:CURRENT "+STAGE:DELTAV:CURRENT.
-    RETURN true. 
+    RETURN true.
 }
 
 // Wait for alignment and predicted time to start the burn. (Minus a physics cycle.)
