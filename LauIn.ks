@@ -1,6 +1,6 @@
 // LauIn.ks - Launch in number of minutes script
 // Copyright © 2021, 2022 V. Quetschke
-// Version 0.11, 06/26/2022
+// Version 0.12, 10/17/2022
 @LAZYGLOBAL OFF.
 
 // Launch into target orbit in given number of minutes, with an optional parameter to launch a given number
@@ -15,7 +15,7 @@
 // Parameters
 DECLARE PARAMETER targetAltkm IS 80,
     targetIncl IS 0,
-    InMinutes IS 5,
+    InMinutes IS 120,
     lauEarly IS 0.   // Default
 
 // Store current IPU value.
@@ -26,7 +26,7 @@ SET CONFIG:IPU TO 2000. // Makes the timing a little better.
 RUNONCEPATH("libcommon").
 RUNONCEPATH("lib_num_to_formatted_str").
 
-LOCAL WarpStopTime to 15. //custom value
+LOCAL WarpStopTime to 3. //custom value
 
 // Controls triggers
 LOCAL runLauIn to true.
@@ -45,6 +45,8 @@ PRINT " | Launch time:                                 | ".
 PRINT " | Time now:                                    | ".
 PRINT " | Time to burn:                                | ".
 PRINT " +----------------------------------------------+ ".
+PRINT " ".
+PRINT " ".
 PRINT " ".
 PRINT " ".
 
@@ -76,7 +78,7 @@ PRINT nuform(targetIncl,4,2)+" / "+nuform(-targetIncl,4,2)+" deg" at(20,4).
 PRINT nuform(targetAltkm,4,1)+" km" at(20,5).
 PRINT nuform(InMinutes,4,1)+" min (-"+ROUND(lauEarly,1)+")" at(21,6).
 
-LOCAL lautime TO (InMinutes-lauEarly)*60+TIME:SECONDS. 
+LOCAL lautime TO (InMinutes-lauEarly)*60+TIME:SECONDS.
 
 PRINT time_formatting(lautime,0) at(20,7).
 
@@ -89,27 +91,52 @@ WHEN DEFINED runLauIn then {
 }
 
 SET KUNIVERSE:TIMEWARP:MODE TO "rails".
-// SET KUNIVERSE:TIMEWARP:RATE TO 1000. // No, done by WARPTO.
 
 PRINT "Warping.                                  " at (0,11).
-KUNIVERSE:TIMEWARP:WARPTO(lautime-WarpStopTime).
+// WARPTO controls TIMEWARP:RATE, do it manually. You cannot change the rate during WARPTO.
+//KUNIVERSE:TIMEWARP:WARPTO(lautime-WarpStopTime).
 
-// Wait for alignment and predicted time to start the burn. (Minus a physics cycle.)
-// Allow 8s plus a correction to get out of a WARP.
-// The 0.53 correction factor was measured, but might change.
-WAIT UNTIL TIME:SECONDS > lautime-WarpStopTime-8-0.525*KUNIVERSE:TIMEWARP:RATE.
+// Better warp stopping/restaring.
+LOCAL gtime TO (lautime-WarpStopTime-TIME:SECONDS).
+LOCAL rtime TO 0.
+// Set rate for warp so that gametime passes in 1s real time.
+LOCAL qrate TO MAX(10^FLOOR(LOG10(gtime)),1). // Rounding to 10^n leads to 1s to 9.99s real time.
+SET KUNIVERSE:TIMEWARP:RATE TO qrate.
+WAIT UNTIL KUNIVERSE:TIMEWARP:RATE / qrate > 0.5. // Wait until the rate is mostly adjusted
 
-// This cancels user initiated wrap mode. This happens for example when aa alarm clock alarm interrupts the
-// WARPTO command from the script and the user starts the warp again manually.
-KUNIVERSE:TIMEWARP:CANCELWARP().
-PRINT "Stopping Warp ...                         " at (0,11).
+UNTIL TIME:SECONDS > lautime-WarpStopTime {
+    SET gtime TO (lautime-WarpStopTime-TIME:SECONDS). // Remaining time in game sec.
+    SET rtime TO gtime/KUNIVERSE:TIMEWARP:RATE. // Remaining time in real sec.
+    PRINT "Est. real time:"+nuform(rtime,5,1)+"s" at (0,12).
+    PRINT "Current/target warp rate:"+nuform(KUNIVERSE:TIMEWARP:RATE,7,0)
+            +"/"+nuform(qrate,7,0) at (0,13).
+
+    // Emergency break. Someone changed warp value
+    IF KUNIVERSE:TIMEWARP:RATE / qrate > 3 {
+        SET KUNIVERSE:TIMEWARP:RATE TO qrate.
+    }
+    IF rtime < 0.8 { // Threshold
+        // Only re-calculate qrate when realtime gets to the threshold.
+        SET qrate TO MAX(10^FLOOR(LOG10(gtime)),1). // For threshold < 1s, this leads to 9.9s or less.
+        IF KUNIVERSE:TIMEWARP:RATE / qrate > 2 { // The WAIT UNTIL below assures this is only executed once.
+            SET KUNIVERSE:TIMEWARP:RATE TO qrate.
+            // Debug output
+            //PRINT "qr:"+nuform(qrate,7,0)+" ra:"+nuform(KUNIVERSE:TIMEWARP:RATE,7,0)+" rt:"+nuform(rtime,5,2).
+            WAIT UNTIL KUNIVERSE:TIMEWARP:RATE / qrate < 2. // Wait until the rate is mostly adjusted
+            //SET gtime TO (lautime-WarpStopTime-TIME:SECONDS). // Remaining time in game sec.
+            //SET rtime TO gtime/KUNIVERSE:TIMEWARP:RATE. // Remaining time in real sec.
+            //PRINT "           ra:"+nuform(KUNIVERSE:TIMEWARP:RATE,7,0)+" rt:"+nuform(rtime,5,2).
+        }
+    }
+}
+PRINT "Stopped Warp ...                         " at (0,11).
 
 // Make sure the warp has stopped
 WAIT UNTIL KUNIVERSE:TIMEWARP:ISSETTLED.
 PRINT "Spare seconds to launch: "+ROUND(lautime-TIME:SECONDS,1).
 
 WAIT UNTIL TIME:SECONDS > lautime.
-PRINT "Warping done.                             " at (0,11).
+PRINT "Launch!".
 SET runLauIn TO False.
 
 RUNPATH("Ascent",targetAlt,targetIncl).
