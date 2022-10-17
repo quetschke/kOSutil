@@ -1,6 +1,6 @@
 // sinfo.ks - Collect stage stats. Walk the tree starting from an engine recursively
 // Copyright © 2021 V. Quetschke
-// Version 0.8.7, 08/25/2021
+// Version 0.8.8, 10/09/2022
 @LAZYGLOBAL OFF.
 
 // Enabling dbg will create a logfile (0:sinfo.log) that can be used for
@@ -1315,27 +1315,32 @@ FUNCTION stinfo {
             } ELSE {
                 // First figure out if we come from parent or child of the decoupler.
                 LOCAL pa TO p:PARENT.
-                LOCAL ch TO p:CHILDREN[0].
-                LOCAL procfrom TO ch. // Current eg coming from child side of decoupler
-                IF egli:CONTAINS(pa) {
-                    // Current eg coming from parent side of decoupler
-                    SET procfrom TO pa.
-                }
-                // Keep decouplers on the side with the lower stage number (later). This is
-                // only done to have another way to find which engine group another group is
-                // connected to. (An earlier stage can look for engine:SEPARATOR in all
-                // engine groups to find out which eg is next.)
-                IF procfrom:DECOUPLEDIN < p:STAGE {
-                    // Found decoupler to earlier stage
-                    // Count for this engine group
-                    procli:ADD(p:UID).
-                    egli:ADD(p).
-                    IF dbg { mLog("     Keep in this eg!"). }
+                IF p:CHILDREN:LENGTH > 0 {
+                    // Sometimes decoupler have no other side
+                    LOCAL ch TO p:CHILDREN[0].
+                    LOCAL procfrom TO ch. // Current eg coming from child side of decoupler
+                    IF egli:CONTAINS(pa) {
+                        // Current eg coming from parent side of decoupler
+                        SET procfrom TO pa.
+                    }
+                    // Keep decouplers on the side with the lower stage number (later). This is
+                    // only done to have another way to find which engine group another group is
+                    // connected to. (An earlier stage can look for engine:SEPARATOR in all
+                    // engine groups to find out which eg is next.)
+                    IF procfrom:DECOUPLEDIN < p:STAGE {
+                        // Found decoupler to earlier stage
+                        // Count for this engine group
+                        procli:ADD(p:UID).
+                        egli:ADD(p).
+                        IF dbg { mLog("     Keep in this eg!"). }
+                    } ELSE {
+                        // Found decoupler to later stage
+                        SET thisEg TO False.
+                        IF dbg { mLog("     Count in other eg!"). }
+                        // Count for later engine group.
+                    }
                 } ELSE {
-                    // Found decoupler to later stage
-                    SET thisEg TO False.
-                    IF dbg { mLog("     Count in other eg!"). }
-                    // Count for later engine group.
+                    IF dbg { mLog("     Onesided decoupler!"). }
                 }
                 // Do not traverse through decoupler.
                 SET stopWalk TO True.
