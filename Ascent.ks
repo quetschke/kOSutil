@@ -1,6 +1,6 @@
 // Ascent.ks - Ascent script
 // Copyright © 2021, 2022 V. Quetschke
-// Version 0.41 - 06/22/2022
+// Version 0.42 - 10/17/2022
 @LAZYGLOBAL OFF.
 
 DECLARE PARAMETER
@@ -43,6 +43,14 @@ ELSE IF lBody:STARTSWITH("Mi") {
     SET turnStartVel to 5.     // Minimum velocity for the turn.
     SET turnEnd to 8000. // Minmus
     SET turnShapeExponent to 0.2.
+}
+ELSE IF lBody:STARTSWITH("Du") {
+    SET actualTurnStart to 300. // Starting height for the turn.
+    SET turnStartVel to 35.     // Minimum velocity for the turn.
+    SET turnEnd to 50000. // Duna
+    SET turnShapeExponent to 0.6.
+    SET maxAAttack TO 45.
+    PRINT "Duna".
 }
 
  // Roll correction to avoid rolling the rocket when launched. The value is calclated below.
@@ -188,7 +196,7 @@ UNTIL MAXTHRUST > 0 {
 //staging
 LOCAL n to 1.
 LOCAL stageThrust to MAXTHRUST.
-LOCAL cTWR TO AVAILABLETHRUST/SHIP:MASS/CONSTANT:g0.
+LOCAL cTWR TO AVAILABLETHRUST/SHIP:MASS/CONSTANT:g0. // Kerbin TWR
 PRINT "Stage "+n+" running. AVAILABLETHRUST: "+round(AVAILABLETHRUST,0)+" kN.".
 PRINT "                 TWR: "+round(cTWR,2).
 IF cTWR > 1.6 {
@@ -249,7 +257,7 @@ PRINT " Reached vacuum.".
 LOCK STEERING TO SHIP:PROGRADE. // Go prograde.
 IF SHIP:APOAPSIS < targetAlt*0.99 { // Avoid extra initions for Kerbalism!!
     PRINT "Apoapsis correction burn.".
-    LOCK THROTTLE TO 0.10.
+    LOCK THROTTLE TO 0.50.
     WAIT UNTIL SHIP:APOAPSIS > targetAlt.
     LOCK THROTTLE TO 0.
     PRINT "Apoapsis corrected.".
