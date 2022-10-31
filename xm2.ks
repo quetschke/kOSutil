@@ -1,6 +1,6 @@
 // xm2.ks - Execute maneuver node script
 // Copyright © 2021, 2022 V. Quetschke
-// Version 0.7.3, 10/12/2022
+// Version 0.7.4, 10/31/2022
 @LAZYGLOBAL OFF.
 
 // Store current IPU value.
@@ -13,7 +13,7 @@ SET CONFIG:IPU TO 2000. // Makes the timing a little better.
 SET THROTTLE TO 0. // Making sure throttle is off
 RUNONCEPATH("libcommon").
 
-LOCAL WarpStopTime to 4. //custom value
+LOCAL WarpStopTime to 3. //custom value
 
 // Time it takes to complete staging event. The time was measured and add 1/2 cycle added. Somehow the
 // program is off for longer burns. Might depend on engine, burn duration or simulation load.
@@ -41,6 +41,9 @@ PRINT " | CBurnLeft:                           | ".
 PRINT " | CBurnLeft (throttle):                | ".
 PRINT " +--------------------------------------+ ".
 PRINT " ".
+PRINT " ".
+PRINT " ".
+PRINT " ".
 
 // Sanity checks
 
@@ -60,6 +63,7 @@ UNTIL SHIP:STAGEDELTAV(SHIP:STAGENUM):VACUUM > 0 {
     PRINT "Removing stage "+SHIP:STAGENUM+" with Delta V = 0.".
     STAGE.
     UNTIL STAGE:READY { WAIT 0. }
+    SET sISP TO getISP(). // Current stage ISP
 }
 
 RUNPATH("sinfo"). // Get stage info
@@ -178,6 +182,7 @@ IF BurnDur < 5 {
     SET BurnDur2 TO BurnDur2/TLimit.
     PRINT "Extended burn duration:  "+nuform(BurnDur,3,4)+"s".
 }
+PRINT " ".
 
 // Gets the combined ISP of the currently active engines
 FUNCTION getISP {
@@ -251,6 +256,7 @@ WHEN defined runXMN then {
 SAS OFF.
 LOCK THROTTLE TO 0.
 LOCK STEERING TO Node:DELTAV.
+LOCAL NodeTime TO Node:TIME.
 
 // Before warping let's point in the right direction.
 // WAIT UNTIL VANG(SHIP:FACING:FOREVECTOR,STEERING) <  1.
@@ -260,33 +266,67 @@ WAIT UNTIL ABS(SteeringManager:ANGLEERROR) + ABS(SteeringManager:ROLLERROR) < 2.
 // Warp!
 SET KUNIVERSE:TIMEWARP:MODE TO "rails".
 PRINT "Warping to maneuver node point" at (0,0).
-LOCAL NodeTime TO Node:TIME.
-PRINT "Warping.                                  " at (0,8).
+LOCAL WarpEnd TO NodeTime-BurnDur2.  // Time to end of timewarp
 
-LOCAL WarpEnd TO NodeTime-BurnDur2-WarpStopTime.  // Time to end of timewarp
-KUNIVERSE:TIMEWARP:WARPTO(WarpEnd). // Returns immediately, but warps ...
+PRINT "Warping. Press 'delete' to abort, 'w' to restart warp.           " at (0,8).
+// WARPTO controls TIMEWARP:RATE, do it manually. You cannot change the rate during WARPTO.
+//KUNIVERSE:TIMEWARP:WARPTO((WarpEnd-WarpStopTime).
 
-// TODO: Better warp stopping. Something like:
-// See lauIN.ks
+// Better warp stopping/restarting.
+LOCAL gtime TO (WarpEnd-WarpStopTime-TIME:SECONDS).
+LOCAL rtime TO 0.
+// Set rate for warp so that gametime passes in 1s real time.
+LOCAL qrate TO MAX(10^FLOOR(LOG10(gtime)),1). // Rounding to 10^n leads to 1s to 9.99s real time.
+SET KUNIVERSE:TIMEWARP:RATE TO qrate.
+WAIT UNTIL KUNIVERSE:TIMEWARP:RATE / qrate > 0.5. // Wait until the rate is mostly adjusted
 
-// Wait for alignment and predicted time to start the burn. (Minus a physics cycle.)
-// Allow 8s plus a correction to get out of a WARP.
-// The 0.53 correction factor was measured, but might change.
-WAIT UNTIL TIME:SECONDS > WarpEnd-8-0.525*KUNIVERSE:TIMEWARP:RATE.
+UNTIL TIME:SECONDS > WarpEnd-WarpStopTime {
+    SET gtime TO (WarpEnd-WarpStopTime-TIME:SECONDS). // Remaining time in game sec.
+    SET rtime TO gtime/KUNIVERSE:TIMEWARP:RATE. // Remaining time in real sec.
+    PRINT "Est. real time:"+nuform(rtime,5,1)+"s" at (0,10).
+    PRINT "Current/target warp rate:"+nuform(KUNIVERSE:TIMEWARP:RATE,7,0)
+            +"/"+nuform(qrate,7,0) at (0,11).
 
-// This cancels user initiated wrap mode. This happens for example when aa alarm clock alarm interrupts the
-// WARPTO command from the script and the user starts the warp again manually.
-KUNIVERSE:TIMEWARP:CANCELWARP().
-PRINT "Stopping Warp ...                         " at (0,8).
+    // Emergency break. Someone changed warp value
+    IF KUNIVERSE:TIMEWARP:RATE / qrate > 3 {
+        SET KUNIVERSE:TIMEWARP:RATE TO qrate.
+    }
+    // Abort or restart warp
+    IF TERMINAL:INPUT:HASCHAR {
+        LOCAL input TO TERMINAL:INPUT:GETCHAR().
+        IF input = TERMINAL:INPUT:DELETERIGHT {
+            PRINT " ".
+            PRINT "Aborted LauIN.ks ..".
+            PRINT " ".
+            PRINT " ".
+            PRINT 1/0.
+        } ELSE IF input = "w" {
+            // Only needed to recalculate if a long enough time passed to change qrate.
+            SET qrate TO MAX(10^FLOOR(LOG10(gtime)),1).
+            SET KUNIVERSE:TIMEWARP:RATE TO qrate.
+            PRINT "Restarted warping. Press 'delete' to abort, 'w' to restart warp." at (0,8).
+        }
+    }
+    IF rtime < 0.8 { // Threshold
+        // Only re-calculate qrate when realtime gets to the threshold.
+        SET qrate TO MAX(10^FLOOR(LOG10(gtime)),1). // For threshold < 1s, this leads to 9.9s or less.
+        IF KUNIVERSE:TIMEWARP:RATE / qrate > 2 { // The WAIT UNTIL below assures this is only executed once.
+            SET KUNIVERSE:TIMEWARP:RATE TO qrate.
+            // Debug output
+            //PRINT "qr:"+nuform(qrate,7,0)+" ra:"+nuform(KUNIVERSE:TIMEWARP:RATE,7,0)+" rt:"+nuform(rtime,5,2).
+            WAIT UNTIL KUNIVERSE:TIMEWARP:RATE / qrate < 2. // Wait until the rate is mostly adjusted
+            //SET gtime TO (WarpEnd-WarpStopTime-TIME:SECONDS). // Remaining time in game sec.
+            //SET rtime TO gtime/KUNIVERSE:TIMEWARP:RATE. // Remaining time in real sec.
+            //PRINT "           ra:"+nuform(KUNIVERSE:TIMEWARP:RATE,7,0)+" rt:"+nuform(rtime,5,2).
+        }
+    }
+}
+PRINT "Stopped Warp ...                                                " at (0,8).
 
 // Make sure the warp has stopped
 WAIT UNTIL KUNIVERSE:TIMEWARP:ISSETTLED.
-PRINT "Spare seconds to node: "+ROUND(WarpEnd+WarpStopTime-TIME:SECONDS,1).
-
-// This included WarpStopTime spare seconds to align to target direction.
-WAIT UNTIL TIME:SECONDS > WarpEnd.
-PRINT "Warping done.                             " at (0,8).
-
+PRINT "Spare seconds to node: "+ROUND(WarpEnd-TIME:SECONDS,1).
+PRINT " ".
 
 //staging
 LOCAL stageThrust to MAXTHRUST. // MAXTHRUST updates based on mass and fuel left
