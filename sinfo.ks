@@ -1,6 +1,6 @@
 // sinfo.ks - Collect stage stats. Walk the tree starting from an engine recursively
-// Copyright © 2021 V. Quetschke
-// Version 0.8.8, 10/09/2022
+// Copyright © 2021, 2022 V. Quetschke
+// Version 0.9.0, 11/06/2022
 @LAZYGLOBAL OFF.
 
 // Enabling dbg will create a logfile (0:sinfo.log) that can be used for
@@ -8,9 +8,12 @@
 //LOCAL dbg TO TRUE.
 LOCAL dbg TO FALSE.
 
+// TODO: Docking ports used as staged decouplers are not recognized.
+// TODO: Decouplers that are upside-down keep their own remaining mass on the wrong stage.
 // TODO: SRBs share fuel in eg, but not in "reality". Average consuption and fuelmass for SRBs will fail for
 //       "unmatched" SRBs. Possible solution: Create an eg for every SRB. Maybe later ...
 
+// See https://github.com/quetschke/kOSutil/blob/main/sinfo.md for additional information.
 
 RUNONCEPATH("libcommon").
 
@@ -118,7 +121,7 @@ RUNONCEPATH("libcommon").
 // 3. Loop over engine groups
 //    x Initialize variables.
 //    x Check for fuel ducts and find targets.
-//    
+//
 //    The plan is to create a list of all eg that deliver fuel to an eg.
 //    Then calculate the burn times for the source and target egs.
 //    Global variables added in this loop:
@@ -149,6 +152,41 @@ RUNONCEPATH("libcommon").
 //     thruA .. Total thrust of the active fueg at atmospheric pressure.
 //
 // 6. Finally calculate mass, ISP, dV, thrust, TWR, burntime, etc.
+//
+// Problems and additional considerations
+// 1. Fuel ducts need kOS tags to to mark the target of the duct. Assigning the same tag to the fuel duct
+//    and the target it attaches iss needed to recognize the connection. This is needed because kOS does
+//    not provide the target information of the part that a fuel duct connects to.
+//    See https://github.com/quetschke/kOSutil/blob/main/sinfo.md#requirements-and-usage
+// 2. Engine plates are problematic because they are decouplers with "attach nodes" where parts are supposed
+//    to remain attached. When staging/decoupling is enabled the information is not propagated correctly to
+//    attached dependents. With "staging enabled" all all children have the same DECOUPLEDIN, STAGE
+//    and DECOUPLER information as if they were decoupled.  The DECOUPLEDIN information is correct when the
+//    part is connected to the node that actually decouples, or is one of its depedents. The parts connected
+//    to the "attach nodes" or as surface attachments (and their dependents) have the wrong information.
+//    The STAGE info seems correct for all dependents that are staged parts (engines).
+//    This leaves no way to identify the decoupled node (the order of the children depends on the order they
+//    were attached, not the node).
+//    We use the following approach for parts that have p:DECOUPLER pointing to an engine plate:
+//    - If the part has a kOS tag starting with "epa" assume the part remains attached and is not decoupled.
+//      Use the DECOUPLEDIN indormation from the engine plate part.
+//    - If the part has a kOS tag starting with "epd" assume the part is not decoupled.
+//      Keep the DECOUPLEDIN information from the part.
+//    - If the part is an engine that is directly attached to the engine plate assume it remains attached
+//      and is not decoupled.
+//    - In all other cases assume the part is decoupled.
+//    This approach allows to use engine plates in most cases to be used without using the epa and epd kOS
+//    tags. On the decoupler node is rarely an engine attached directly, usually there is a tank and other
+//    parts between the decoupler node and the engine. On the other hand engines are usually attached
+//    directly to the engine plate when they are supposed to stay and be used after decoupling the lower part.
+//    The third condition above avoides that "epa" tags need to be placed.
+//    In other certain cases tags need to be used. Examples:
+//    - The engines are attached via structural or intermediate parts to the engine plate. Use the "epa" tag
+//      for those parts and the engines.
+//    - The engine plate is used as a cargo bay or fairing. Use the "epa" tag for the parts that will
+//      remain attached.
+//    - SRBs (or Twin-Boar) are examples of engines that bring their own fuel. If those are attached directly
+//      to the decoupling node the "epd" tag is needed to have these parts treated correctly.
 
 DELETEPATH("0:sinfo.log").
 
@@ -269,18 +307,23 @@ FUNCTION stinfo {
         }
     }
 
-    IF dbg { mLog("p:DECOUPLEDIN,p:STAGE,p:TITLE,p:NAME,p:TYPENAME,lvl"). }
+    IF dbg {
+        mLog("Loop over all engines and find members of engine groups").
+        mLog("Ep_Decoupledin(p),p:STAGE,p:TITLE,p:NAME,p:TYPENAME,lvl").
+    }
     LOCAL egidx TO 0.
     LOCAL eg TO LIST().
     FOR e IN elist {
         // To process fuel flow correctly start with the engines with the earliest decoupling
 
         SET egastage TO e:STAGE. // Use this as the stage the current engine group becomes active
-        SET egdstage TO e:DECOUPLEDIN. // The stage when current engine has been removed
+        SET egdstage TO Ep_Decoupledin(e). // The stage when current engine has been removed
+
         SET egli TO LIST(). // Collect engine group list
         SET egtali TO LIST(). // Holds all tanks and engines from engine group.
         SET egfdli TO LIST(). // Holds all fuel line parts from engine group.
 
+        IF dbg { mLog("egdstage: "+egdstage+" / egastage: "+egastage). }
         IF eTree(e,0) { // Find the engine group where this engine belongs to.
             // collects values in egli, egtali, egfdli, egastage, egdstage.
             // Successfully returned
@@ -306,14 +349,18 @@ FUNCTION stinfo {
 
     // 2. Now loop over all parts
     LOCAL plist TO -999. LIST PARTS IN plist.
-    IF dbg { mLog("kst,p:DECOUPLEDIN,p:STAGE,p:TITLE,p:TYPENAME,p:MASS,p:DRYMASS,fuel,ineg"). }
+    IF dbg {
+        mLog("Loop over all parts").
+        mLog("kst,Ep_Decoupledin(p),p:STAGE,p:TITLE,p:TYPENAME,p:MASS,p:DRYMASS,fuel,ineg").
+    }
     FOR p IN plist {
         LOCAL ineg TO 1.
         IF NOT procli:CONTAINS(p:UID) {
             // List the ones we missed.
             SET ineg TO 0.
         }
-        LOCAL lst is p:DECOUPLEDIN+1.  // Last stage where mass is counted
+        LOCAL lst is Ep_Decoupledin(p)+1.  // Last stage where mass is counted
+
         LOCAL ast is p:STAGE.  // Stage where part is activated
         LOCAL kst is lst.  // Stage number like in KER/MJ
 
@@ -322,8 +369,35 @@ FUNCTION stinfo {
         IF p:TYPENAME = "LaunchClamp" { SET pmass TO 0. } // Ignore mass of clamps.
 
         IF p:TYPENAME = "Decoupler" {
-            // Decouplers have only mass prior to being activated, they stay on without mass
-            SET kst TO ast+1.
+            // Decouplers and separators have only mass prior to being activated,
+            // they stay on without mass.
+            IF p:NAME:STARTSWITH("Separator") OR p:NAME:STARTSWITH("Decoupler")
+               OR p:NAME:STARTSWITH("radialDe") {
+                // Warning! The script assumes that lower/later stages loose the mass. It cannot detect if
+                // a decoupler is mounted upside down.
+                // Possible solution: check parent and children for DECOUPLER. The part that is pointing
+                // to a different decoupler is attached to the decoupler.
+                SET kst TO ast+1.
+            } ELSE IF p:NAME:STARTSWITH("EnginePlate") {
+                // Engine plates keep their mass
+            } ELSE {
+                // Found unknown decoupler
+                mLog("Unknown decoupler: "+p:TYPENAME+" / "+p:TITLE+" / "+p:NAME).
+                PRINT 1/0.
+            }
+        }
+
+        IF p:TYPENAME = "DockingPort" AND p:HASMODULE("ModuleDockingNode") {
+            // Docking ports used as decouplers have the mass where the port is attached to.
+            // Possible solution: check parent and children for DECOUPLER. The part that is pointing
+            // to a different decoupler is attached to the docking port.
+            IF p:GETMODULE("ModuleDockingNode"):HASEVENT("port: disable staging") {
+                mLog(" ").
+                mLog("     Found "+p:TITLE+" with staging/decoupling enabled!").
+                mLog("     This is not supported. sinfo output is likely incorrect!").
+                mLog(" ").
+                PRINT 1/0.
+            }
         }
 
         // Fairings need special treatment
@@ -353,9 +427,11 @@ FUNCTION stinfo {
 
         // Set regular mass to kst stage
         SET stmass[kst] TO stmass[kst] + pmass.
-        // Log the part
-        IF dbg { mLog(kst+","+p:DECOUPLEDIN+","+p:STAGE+","+p:TITLE+","+p:TYPENAME+","
-             +p:MASS+","+p:DRYMASS+","+(p:MASS-p:DRYMASS)+","+ineg). }
+        // Log the part. Use plist.ks to generate more information.
+        IF dbg {
+            mLog(kst+","+Ep_Decoupledin(p)+","+p:STAGE+","+p:TITLE+","+p:TYPENAME+","
+                +p:MASS+","+p:DRYMASS+","+(p:MASS-p:DRYMASS)+","+ineg).
+        }
     }
 
 
@@ -402,7 +478,7 @@ FUNCTION stinfo {
             } ELSE {
                 IF kTag = "<none>" {
                     PRINT "Fuel Ducts cannot have a kOS tag with the value <none>.".
-                    PRINT "That tag value us used for internal fuel duct processing,".
+                    PRINT "That tag value is used for internal fuel duct processing,".
                     PRINT "Please use a different tag to identify fuel duct targets.".
                     PRINT " ".
                     RETURN 0.
@@ -886,10 +962,10 @@ FUNCTION stinfo {
                 LOCAL conS TO 0. // Substage consumption
                 LOCAL thruVS TO 0. // Substage vacuum thrust
                 LOCAL thruAS TO 0. // Substage atmospheric thrust
-                
+
                 // Initialize substage and add burn time.
                 sub[s]:ADD(LEXICON("bt", minburn, "con", 0, "thruV", 0, "thruA", 0)).
-                
+
                 IF dbg {
                     mLog(" ").
                     mLog("Consume fuel.").
@@ -906,7 +982,7 @@ FUNCTION stinfo {
                             SET conS TO conS + conW[bs][f]. // Careful with the bs change below.
                             SET thruVS TO thruVS + thruVW[bs][f].
                             SET thruAS TO thruAS + thruAW[bs][f].
-                            
+
                             // RE can be annoying!
                             IF f = OXidx AND conW[bs][f] > 0 { // Include LF from REs
                                 LOCAL bsLF TO burnsrcLF[e][LFidx].
@@ -970,7 +1046,7 @@ FUNCTION stinfo {
                 SET sub[s][sidx]:thruV TO thruVS.
                 SET sub[s][sidx]:thruA TO thruAS.
             }
-            
+
             // Collect leftover fuel that would get dropped and check if we can stage
             LOCAL nofuel TO True.
             LOCAL hasdropeg TO False.
@@ -1192,8 +1268,8 @@ FUNCTION stinfo {
             LOCAL subAdV TO ispsC*CONSTANT:g0*LN(curmass/submass).
             SET stVdV TO stVdV + subVdV.
             SET stAdV TO stAdV + subAdV.
-            IF dbg { mLog(i+","+nuform(sub[s][i]:bt,3,1)+","+nuform(fcon,1,5)+","+nuform(fthruV,3,0)+","
-                +nuform(fthruA,3,0)+","+nuform(ispsV,3,0)+","+nuform(subfubu,3,2)+","+nuform(subVdV,4,0)
+            IF dbg { mLog(i+","+nuform(sub[s][i]:bt,3,1)+","+nuform(fcon,1,5)+","+nuform(fthruV,3,2)+","
+                +nuform(fthruA,3,2)+","+nuform(ispsV,3,0)+","+nuform(subfubu,3,2)+","+nuform(subVdV,4,0)
                           +","+nuform(subAdV,4,0)+","+nuform(curmass,3,2)+","+nuform(submass,3,2)). }
             SET curmass TO submass. // The next substage starts with the current substge end mass.
         }
@@ -1280,6 +1356,7 @@ FUNCTION stinfo {
         }
 
         LOCAL xfeed TO True. // For parts where crossfeed can be modified.
+        LOCAL is_ep TO False. // True for engine plates.
         LOCAL thisEg TO True. // Part belongs to this eg.
         LOCAL stopWalk TO False. // Stop recursion when true.
 
@@ -1288,11 +1365,20 @@ FUNCTION stinfo {
             egtali:ADD(p).
             // Find earliest egastage and egdstage for engines.
             IF p:TYPENAME = "Engine" {
-                // This should only trigger for egs with decouplers with crossfeed on.
-                LOCAL pastage TO p:STAGE. // Part becomes active
-                LOCAL pdstage TO p:DECOUPLEDIN. // Part has been removed
-                IF pastage > egastage { SET egastage TO pastage. }
-                IF pdstage > egdstage { SET egdstage TO pdstage. }
+                // This should only trigger for egs with decouplers with crossfeed on or if engines attached
+                // to the same group are activated at different stages.
+
+                LOCAL pastage TO p:STAGE. // Stage when part becomes active
+                IF pastage > egastage {
+                    IF dbg { mLog("   - Change egastage from "+egastage+" to "+pastage). }
+                    SET egastage TO pastage.
+                }
+                LOCAL pdstage TO Ep_Decoupledin(p). // Stage when part has been removed
+                // This could happen for decouplers with crossfeed enabled.
+                IF pdstage > egdstage {
+                    IF dbg { mLog("   - Change egdstage from "+egdstage+" to "+pdstage). }
+                    SET egdstage TO pdstage.
+                }
             }
         }
 
@@ -1309,9 +1395,15 @@ FUNCTION stinfo {
         }
 
         IF p:TYPENAME = "Decoupler" {
-            IF xfeed {
-                // One engine group, just traverse through it
-                IF dbg { mLog("Traversing through decoupler. Adding fuel to stage: "+egastage). }
+            IF p:NAME:STARTSWITH("EnginePlate") {
+                // Engine plates don't have a ModuleToggleCrossfeed, they never have crossfeed
+                // when staging is enabled.
+                SET is_ep TO True.
+                // See below. Keep xfeed True, even though that's redundant.
+            }
+            IF xfeed OR is_ep {
+                // One engine group, just traverse through it. EPs get special treatment below.
+                IF dbg { mLog("   Traversing through decoupler or engine plate."). }
             } ELSE {
                 // First figure out if we come from parent or child of the decoupler.
                 LOCAL pa TO p:PARENT.
@@ -1329,9 +1421,7 @@ FUNCTION stinfo {
                     // engine groups to find out which eg is next.)
                     IF procfrom:DECOUPLEDIN < p:STAGE {
                         // Found decoupler to earlier stage
-                        // Count for this engine group
-                        procli:ADD(p:UID).
-                        egli:ADD(p).
+                        // Count for this engine group. Keep thisEg True
                         IF dbg { mLog("     Keep in this eg!"). }
                     } ELSE {
                         // Found decoupler to later stage
@@ -1340,7 +1430,8 @@ FUNCTION stinfo {
                         // Count for later engine group.
                     }
                 } ELSE {
-                    IF dbg { mLog("     Onesided decoupler!"). }
+                    // Count for this engine group. Keep thisEg True
+                    IF dbg { mLog("     Onesided decoupler! Keep in this eg!"). }
                 }
                 // Do not traverse through decoupler.
                 SET stopWalk TO True.
@@ -1350,23 +1441,109 @@ FUNCTION stinfo {
         IF thisEg {
             procli:ADD(p:UID).
             egli:ADD(p).
-            IF dbg { mLog(p:DECOUPLEDIN+","+p:STAGE+","+p:TITLE+","+p:NAME+","+p:TYPENAME+","+l). }
+            IF dbg { mLog(Ep_Decoupledin(p)+","+p:STAGE+","+p:TITLE+","+p:NAME+","+p:TYPENAME+","+l). }
         }
 
         // The following parts have no Crossfeed. Stop the "walk" here.
         IF nocflist:CONTAINS(p:NAME) {
-            IF dbg { mLog("     Found "+p:TITLE+" with crossfeed: "+False). }
+            IF dbg { mLog("   Found "+p:TITLE+" with crossfeed: "+False). }
             SET stopWalk TO True.
         }
 
         IF stopWalk { RETURN True. }
 
-        LOCAL children TO p:CHILDREN.
-        FOR child IN children {
-            eTree(child,l+1).
+        // Engine plates are problematic. See "Problems and additional considerations" at the beginning
+        // of the file. Use the following approach:
+        // If the part is an engine plate, first check if the [dependent]:DECOUPLED value is the same as
+        // the engime plates value. If yes, they are in the same eg. (The "top" node is correct). Otherwise
+        // for engine plates going to attached parts check the following 3 conditions in that order:
+        // If the dependent part has/is ..
+        // - kOS tag starting with "epa": Assume part is in same eg, call eTree().
+        // - kOS tag starting with "epd": Assume part is decoupled, don't call eTree().
+        // - an engine: Assume part is attached, call eTree()
+        // - nothing of the above, assume it is decoupled, don't call eTree().
+        // For parts going to engine plates check for the corresponding conditions:
+        // (extrapolate from above)
+        FOR child IN p:CHILDREN {
+            IF is_ep {
+                LOCAL kTag TO child:GETMODULE("KOSNameTag"):GETFIELD("name tag").
+                IF child:DECOUPLER = p:DECOUPLER {
+                    IF dbg { mLog("   C: check: "+child:TITLE+" / to ep top node"). }
+                    eTree(child,l+1).
+                } ELSE IF kTag:STARTSWITH("epa") {
+                    IF dbg { mLog("   C: check: "+child:TITLE+" / epa"). }
+                    eTree(child,l+1).
+                } ELSE IF kTag:STARTSWITH("epd") {
+                    IF dbg { mLog("   C: skip: "+child:TITLE+" / epd"). }
+                } ELSE IF child:TYPENAME = "Engine"{
+                    IF dbg { mLog("   C: check: "+child:TITLE+" / engine"). }
+                    eTree(child,l+1).
+                } ELSE {
+                    IF dbg { mLog("   C: skip: "+child:TITLE+" / assume epd"). }
+                }
+            } ELSE IF child:TYPENAME = "Decoupler" AND child:NAME:STARTSWITH("EnginePlate") {
+                // Check if we go to EP. Go only if we are an engine, epa is set, or epd is not set.
+                LOCAL kTag TO p:GETMODULE("KOSNameTag"):GETFIELD("name tag").
+                IF child:DECOUPLER = p:DECOUPLER {
+                    IF dbg { mLog("   C: check: "+child:TITLE+" / from ep top node"). }
+                    eTree(child,l+1).
+                } ELSE IF kTag:STARTSWITH("epa") {
+                    IF dbg { mLog("   C: check: "+child:TITLE+" / from epa"). }
+                    eTree(child,l+1).
+                } ELSE IF kTag:STARTSWITH("epd") {
+                    IF dbg { mLog("   C: skip: "+child:TITLE+" / from epd"). }
+                } ELSE IF p:TYPENAME = "Engine" {
+                    IF dbg { mLog("   C: check: "+child:TITLE+" / from engine"). }
+                    eTree(child,l+1).
+                } ELSE {
+                    IF dbg { mLog("   C: skip: "+child:TITLE+" / from ep assume epd"). }
+                }
+            } ELSE {
+                // Not an engine plate, and not going to one. Check for attachment to eg.
+                IF dbg { mLog("   C: check: "+child:TITLE). }
+                eTree(child,l+1).
+            }
         }
         IF p:HASPARENT {
-            eTree(p:PARENT,l-1).
+            IF is_ep {
+                LOCAL kTag TO p:PARENT:GETMODULE("KOSNameTag"):GETFIELD("name tag").
+                IF p:PARENT:DECOUPLER = p:DECOUPLER {
+                    IF dbg { mLog("   P: check: "++p:PARENT:TITLE+" / to ep top node"). }
+                    eTree(p:PARENT,l+1).
+                } ELSE IF kTag:STARTSWITH("epa") {
+                    IF dbg { mLog("   P: check: "+p:PARENT:TITLE+" / epa"). }
+                    eTree(p:PARENT,l+1).
+                } ELSE IF kTag:STARTSWITH("epd") {
+                    IF dbg { mLog("   P: skip: "+p:PARENT:TITLE+" / epd"). }
+                } ELSE IF p:PARENT:TYPENAME = "Engine" {
+                    IF dbg { mLog("   P: check: "+p:PARENT:TITLE+" / engine"). }
+                    eTree(p:PARENT,l+1).
+                } ELSE {
+                    IF dbg { mLog("   P: skip: "+p:PARENT:TITLE+" / no-epa"). }
+                }
+            } ELSE IF p:PARENT:TYPENAME = "Decoupler" AND p:PARENT:NAME:STARTSWITH("EnginePlate"){
+                // Check if we go to EP. Go only if we are an engine, epa is set, or epd is not set.
+                LOCAL kTag TO p:GETMODULE("KOSNameTag"):GETFIELD("name tag").
+                IF p:PARENT:DECOUPLER = p:DECOUPLER {
+                    IF dbg { mLog("   P: check: "+p:PARENT:TITLE+" / from ep top node"). }
+                    eTree(p:PARENT,l+1).
+                } ELSE IF kTag:STARTSWITH("epa") {
+                    IF dbg { mLog("   P: check: "+p:PARENT:TITLE+" / from epa"). }
+                    eTree(p:PARENT,l+1).
+                } ELSE IF kTag:STARTSWITH("epd") {
+                    IF dbg { mLog("   P: skip: "+p:PARENT:TITLE+" / from epd"). }
+                } ELSE IF p:TYPENAME = "Engine" {
+                    IF dbg { mLog("   P: check: "+p:PARENT:TITLE+" / from engine"). }
+                    eTree(p:PARENT,l+1).
+                } ELSE {
+                    IF dbg { mLog("   P: skip: "+p:PARENT:TITLE+" / from ep assume epd"). }
+                }
+            } ELSE {
+                // Not an engine plate, and not going to one. Check for attachment to eg.
+                IF dbg { mLog("   P: check: "+p:PARENT:TITLE). }
+                eTree(p:PARENT,l+1).
+            }
+
         }
 
         RETURN True.
@@ -1405,7 +1582,7 @@ FUNCTION stinfo {
         }
 
         LOCAL tlimit IS x:THRUSTLIMIT/100. // Needed to adjust res:MAXMASSFLOW
-        IF dbg { mLog("Engine: "+x:TITLE+" "+x:STAGE+" "+x:DECOUPLEDIN). }
+        IF dbg { mLog("Engine: "+x:TITLE+" "+x:STAGE+" "+Ep_Decoupledin(x)). }
         FOR fkey IN x:CONSUMEDRESOURCES:KEYS { // fkey is language localized display name
             LOCAL cRes TO x:CONSUMEDRESOURCES[fkey]. // Consumed resource
             LOCAL fname TO cRes:NAME. // Workaround for bug. fname not localized (language)
@@ -1436,7 +1613,7 @@ FUNCTION stinfo {
         // Now add fuel consumption and thrust to the applicable stages.
         // This also adds the LF mass consumption correction for REs.
         FROM {LOCAL s IS 0.} UNTIL s > STAGE:NUMBER STEP {SET s TO s+1.} DO {
-            IF s <= x:STAGE AND s > x:DECOUPLEDIN {
+            IF s <= x:STAGE AND s > Ep_Decoupledin(x) {
                 // Add values cumulatively.
                 FROM {LOCAL x IS 0.} UNTIL x >= fuli:LENGTH STEP {SET x TO x+1.} DO {
                     SET con[i][s][x] TO con[i][s][x] + conF[x].
@@ -1534,4 +1711,37 @@ FUNCTION stinfo {
             }
         }
     }
+
+    FUNCTION Ep_Decoupledin {
+        PARAMETER p.    // Part.
+        // All parts attached to engine plates and their dependents, except the ones attached
+        // attached to the "decoupled node" or the "top node" do not have their DECOUPLEDIN set correctly.
+        // Use the value of the engine plate instead.
+        // These parts can be identified by p:DECOUPLER linking to engine plate. The "top node" does not
+        // need to be considered differently, as it is covered by p:DECOUPLER another decoupler.
+
+        LOCAL pDE TO p:DECOUPLER.
+        IF pDE:TYPENAME <> "String" AND pDE:NAME:STARTSWITH("EnginePlate") {
+            // Dependent of an active engine plate
+            LOCAL kTag TO p:GETMODULE("KOSNameTag"):GETFIELD("name tag").
+            IF kTag:STARTSWITH("epa") {
+                // EP attached
+                RETURN pDE:DECOUPLEDIN.
+            } ELSE IF kTag:STARTSWITH("epd") {
+                // Part is on decoupled side
+                RETURN p:DECOUPLEDIN.
+            } ELSE IF p:TYPENAME = "Engine"
+                      AND ( p:PARENT = pDE OR p:CHILDREN:CONTAINS(pDE)  ) {
+                // Engine is directly attached to the engine plate.
+                RETURN pDE:DECOUPLEDIN.
+            } ELSE {
+                // No special case, assume part is on the decoupled side.
+                RETURN p:DECOUPLEDIN.
+            }
+        } ELSE {
+            // Not decoupled from an engine plate
+            RETURN p:DECOUPLEDIN.
+        }
+    }
+
 }
