@@ -1,6 +1,6 @@
 // sinfo.ks - Collect stage stats. Walk the tree starting from an engine recursively
 // Copyright © 2021, 2022 V. Quetschke
-// Version 0.9.1, 11/08/2022
+// Version 0.9.2, 11/09/2022
 @LAZYGLOBAL OFF.
 
 // Enabling dbg will create a logfile (0:sinfo.log) that can be used for
@@ -96,7 +96,7 @@ RUNONCEPATH("libcommon").
 //      egfddest Holds the destination eg for the fuel duct parts from engine group.
 //      egfdsrc  Holds the fd source egs for the engine group.
 //      egastage Stage when eg becomes active
-//      egdstage Stage when eg is decoupled
+//      egdstage Stage when eg is completely decoupled. Engine groups might span multiple staging events.
 //    The following variables are used to store stage dependent information. (They are initialized in
 //    point 3. below.:
 //      con[eg][st][fu]   Fuel consuption in eg, by stage and fuel
@@ -1376,7 +1376,7 @@ FUNCTION stinfo {
                 }
                 LOCAL pdstage TO Ep_Decoupledin(p). // Stage when part has been removed
                 // This could happen for decouplers with crossfeed enabled.
-                IF pdstage > egdstage {
+                IF pdstage < egdstage {
                     IF dbg { mLog("   - Change egdstage from "+egdstage+" to "+pdstage). }
                     SET egdstage TO pdstage.
                 }
