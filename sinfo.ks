@@ -1509,7 +1509,7 @@ FUNCTION stinfo {
             IF is_ep {
                 LOCAL kTag TO p:PARENT:GETMODULE("KOSNameTag"):GETFIELD("name tag").
                 IF p:PARENT:DECOUPLER = p:DECOUPLER {
-                    IF dbg { mLog("   P: check: "++p:PARENT:TITLE+" / to ep top node"). }
+                    IF dbg { mLog("   P: check: "+p:PARENT:TITLE+" / to ep top node"). }
                     eTree(p:PARENT,l+1).
                 } ELSE IF kTag:STARTSWITH("epa") {
                     IF dbg { mLog("   P: check: "+p:PARENT:TITLE+" / epa"). }
