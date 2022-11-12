@@ -1,6 +1,6 @@
 // sinfo.ks - Collect stage stats. Walk the tree starting from an engine recursively
 // Copyright © 2021, 2022 V. Quetschke
-// Version 0.9.2, 11/09/2022
+// Version 0.9.3, 11/11/2022
 @LAZYGLOBAL OFF.
 
 // Enabling dbg will create a logfile (0:sinfo.log) that can be used for
@@ -8,8 +8,6 @@
 //LOCAL dbg TO TRUE.
 LOCAL dbg TO FALSE.
 
-// TODO: Docking ports used as staged decouplers are not recognized.
-// TODO: Decouplers that are upside-down keep their own remaining mass on the wrong stage.
 // TODO: SRBs share fuel in eg, but not in "reality". Average consuption and fuelmass for SRBs will fail for
 //       "unmatched" SRBs. Possible solution: Create an eg for every SRB. Maybe later ...
 
@@ -158,16 +156,31 @@ RUNONCEPATH("libcommon").
 //    and the target it attaches iss needed to recognize the connection. This is needed because kOS does
 //    not provide the target information of the part that a fuel duct connects to.
 //    See https://github.com/quetschke/kOSutil/blob/main/sinfo.md#requirements-and-usage
-// 2. Engine plates are problematic because they are decouplers with "attach nodes" where parts are supposed
-//    to remain attached. When staging/decoupling is enabled the information is not propagated correctly to
-//    attached dependents. With "staging enabled" all all children have the same DECOUPLEDIN, STAGE
-//    and DECOUPLER information as if they were decoupled.  The DECOUPLEDIN information is correct when the
-//    part is connected to the node that actually decouples, or is one of its depedents. The parts connected
+// 2. Decoupling parts (decoupler, separator, engine plate, structural pylon, small hardpoint and docking
+//    ports) with staging enabled provide no information to kOS about which side they stay attached to
+//    when staged, and where their mass needs to be counted.
+//    Technical: Independently of the orientation of the decoupler or engine plate p:DECOUPLER has the same
+//    value as the next part towards the root part. (This also happens to be the parent node).
+//    Implementation: The script assumes a normal/standard orientation for those parts, meaning the
+//    decouplers stay with the earlier stage and are removed after staging. Engine plates are an exception
+//    and are assumed to stay attached with the later stage after staging.
+//    Option: As this default setting might not reflect the orientation of the part a kOS tag on the
+//    decoupler can be used to indicate the part is rotated:
+//    - kOS tag "reverse" tells the script the decoupling part is reversed/upside down.
+//  2.a Engine plates are even more problematic because they are decouplers with "attach nodes" where parts
+//    are supposed to remain attached. When staging/decoupling is enabled the script does not know which
+//    parts remain attached and what is the decoupled node.
+//    Technical: With "staging enabled" all children have the same DECOUPLEDIN, STAGE and DECOUPLER
+//    information as if they were decoupled.  The DECOUPLEDIN information is correct when the part is
+//    connected to the node that actually decouples, or is one of its depedents. The parts connected
 //    to the "attach nodes" or as surface attachments (and their dependents) have the wrong information.
 //    The STAGE info seems correct for all dependents that are staged parts (engines).
 //    This leaves no way to identify the decoupled node (the order of the children depends on the order they
 //    were attached, not the node).
-//    We use the following approach for parts that have p:DECOUPLER pointing to an engine plate:
+//    Implementation: The script uses the following approach for parts that have p:DECOUPLER pointing to an
+//    engine plate. (The engine plate:DECOUPLER = top node:DECOUPLER (parent)):
+//    - If engine plate:DECOUPLER = dependent:DECOUPLER the dependents values are correct. (Always the
+//      parent node)
 //    - If the part has a kOS tag starting with "epa" assume the part remains attached and is not decoupled.
 //      Use the DECOUPLEDIN indormation from the engine plate part.
 //    - If the part has a kOS tag starting with "epd" assume the part is not decoupled.
@@ -180,13 +193,16 @@ RUNONCEPATH("libcommon").
 //    parts between the decoupler node and the engine. On the other hand engines are usually attached
 //    directly to the engine plate when they are supposed to stay and be used after decoupling the lower part.
 //    The third condition above avoides that "epa" tags need to be placed.
-//    In other certain cases tags need to be used. Examples:
+//    In other cases tags need to be used.
+//    Examples:
 //    - The engines are attached via structural or intermediate parts to the engine plate. Use the "epa" tag
 //      for those parts and the engines.
 //    - The engine plate is used as a cargo bay or fairing. Use the "epa" tag for the parts that will
 //      remain attached.
 //    - SRBs (or Twin-Boar) are examples of engines that bring their own fuel. If those are attached directly
 //      to the decoupling node the "epd" tag is needed to have these parts treated correctly.
+//    - The engine plate is mounted upside-down: Assign the kOS tag "reverse" to the engine plate and
+//      "epd" tags to engines on attach nodes.
 
 DELETEPATH("0:sinfo.log").
 
@@ -235,7 +251,7 @@ FUNCTION stinfo {
     LOCAL egtali TO LIST().  // Holds all tanks and engines from engine group.
     LOCAL egfdli TO LIST().  // Holds all fuel line parts from engine group.
     LOCAL egastage TO 999.   // Use this as the stage the current engine group becomes active
-    LOCAL egdstage TO 999.   // The stage when current engine has been removed
+    LOCAL egdstage TO 999.   // The stage when current engine group has been removed
 
     LOCAL fdtotal TO 0.      // Numer of all active fuel ducts across all eg.
     LOCAL actfdstart TO LIST(). // List of eg that have no incoming fd.
@@ -317,7 +333,7 @@ FUNCTION stinfo {
         // To process fuel flow correctly start with the engines with the earliest decoupling
 
         SET egastage TO e:STAGE. // Use this as the stage the current engine group becomes active
-        SET egdstage TO Ep_Decoupledin(e). // The stage when current engine has been removed
+        SET egdstage TO Ep_Decoupledin(e). // The stage when current engine group has been completely removed
 
         SET egli TO LIST(). // Collect engine group list
         SET egtali TO LIST(). // Holds all tanks and engines from engine group.
@@ -368,6 +384,8 @@ FUNCTION stinfo {
 
         IF p:TYPENAME = "LaunchClamp" { SET pmass TO 0. } // Ignore mass of clamps.
 
+        // 1 = mass normally stays with decoupled (earlier) stage, -1 = mass stays with the next stage.
+        LOCAL is_decoup TO 0.
         IF p:TYPENAME = "Decoupler" {
             // Decouplers and separators have only mass prior to being activated,
             // they stay on without mass.
@@ -375,12 +393,11 @@ FUNCTION stinfo {
                OR p:NAME:STARTSWITH("radialDe") OR p:NAME:STARTSWITH("smallHard")
                OR p:NAME:STARTSWITH("structuralPyl") {
                 // Warning! The script assumes that lower/later stages loose the mass. It cannot detect if
-                // a decoupler is mounted upside down.
-                // Possible solution: check parent and children for DECOUPLER. The part that is pointing
-                // to a different decoupler is attached to the decoupler.
-                SET kst TO ast+1.
+                // a decoupler is mounted upside down. Use kOS tag "reverse" to guide the script.
+                SET is_decoup TO 1.
             } ELSE IF p:NAME:STARTSWITH("EnginePlate") {
-                // Engine plates keep their mass
+                // Engine plates keep their mass, unless reversed.
+                SET is_decoup TO -1.
             } ELSE {
                 // Found unknown decoupler
                 mLog("Unknown decoupler: "+p:TYPENAME+" / "+p:TITLE+" / "+p:NAME).
@@ -390,14 +407,29 @@ FUNCTION stinfo {
 
         IF p:TYPENAME = "DockingPort" AND p:HASMODULE("ModuleDockingNode") {
             // Docking ports used as decouplers have the mass where the port is attached to.
-            // Possible solution: check parent and children for DECOUPLER. The part that is pointing
-            // to a different decoupler is attached to the docking port.
+            // kOS cannot detect automatically which side a docking port is attached to.
             IF p:GETMODULE("ModuleDockingNode"):HASEVENT("port: disable staging") {
-                mLog(" ").
-                mLog("     Found "+p:TITLE+" with staging/decoupling enabled!").
-                mLog("     This is not supported. sinfo output is likely incorrect!").
-                mLog(" ").
-                PRINT 1/0.
+                // Warning! The script assumes that lower/later stages loose the mass. It cannot detect if
+                // a docking port is mounted upside down. Use kOS tag "reverse" to guide the script.
+                SET is_decoup TO 1.
+            }
+        }
+
+        // Decide where the mass of the decouplers stays
+        IF is_decoup <> 0 {
+            LOCAL is_reverse TO 0.
+            IF p:GETMODULE("KOSNameTag"):GETFIELD("name tag"):STARTSWITH("reverse") {
+                SET is_reverse TO 1.
+                IF dbg { mLog("   - "+p:TITLE+" / reverse"). }
+            } ELSE {
+                IF dbg { mLog("   - "+p:TITLE+" / normal"). }
+            }
+            IF is_decoup = 1 {
+                // Mass normally gets decoupled
+                IF NOT is_reverse { SET kst TO ast+1. }
+            } ELSE {
+                // Mass normally stays
+                IF is_reverse { SET kst TO ast+1. }
             }
         }
 
@@ -779,7 +811,7 @@ FUNCTION stinfo {
                     SET burnsrc[e][f] TO e.
                     LOCAL edstr TO "".
                     // Find alternative fuel
-                    // Loop over all and keep/reset the lowest fdl (all fdl=0)
+                    // Loop over all and keep/reset the lowest fuel duct level (fdl) (all fdl=0).
                     LOCAL ee TO e.
                     IF burnV < 0.01 { // Shorter than a physics tick
                         LOCAL stoploop TO False.
@@ -1358,7 +1390,6 @@ FUNCTION stinfo {
 
         LOCAL xfeed TO True. // For parts where crossfeed can be modified.
         LOCAL is_ep TO False. // True for engine plates.
-        LOCAL thisEg TO True. // Part belongs to this eg.
         LOCAL stopWalk TO False. // Stop recursion when true.
 
         IF p:MASS > p:DRYMASS or p:TYPENAME = "Engine" {
@@ -1406,44 +1437,33 @@ FUNCTION stinfo {
                 // One engine group, just traverse through it. EPs get special treatment below.
                 IF dbg { mLog("   Traversing through decoupler or engine plate."). }
             } ELSE {
-                // First figure out if we come from parent or child of the decoupler.
-                LOCAL pa TO p:PARENT.
-                IF p:CHILDREN:LENGTH > 0 {
-                    // Sometimes decoupler have no other side
-                    LOCAL ch TO p:CHILDREN[0].
-                    LOCAL procfrom TO ch. // Current eg coming from child side of decoupler
-                    IF egli:CONTAINS(pa) {
-                        // Current eg coming from parent side of decoupler
-                        SET procfrom TO pa.
-                    }
-                    // Keep decouplers on the side with the lower stage number (later). This is
-                    // only done to have another way to find which engine group another group is
-                    // connected to. (An earlier stage can look for engine:SEPARATOR in all
-                    // engine groups to find out which eg is next.)
-                    IF procfrom:DECOUPLEDIN < p:STAGE {
-                        // Found decoupler to earlier stage
-                        // Count for this engine group. Keep thisEg True
-                        IF dbg { mLog("     Keep in this eg!"). }
-                    } ELSE {
-                        // Found decoupler to later stage
-                        SET thisEg TO False.
-                        IF dbg { mLog("     Count in other eg!"). }
-                        // Count for later engine group.
-                    }
-                } ELSE {
-                    // Count for this engine group. Keep thisEg True
-                    IF dbg { mLog("     Onesided decoupler! Keep in this eg!"). }
-                }
+                // kOS has no way to find out which side a decoupler (or similar) stays attached to.
+                // The mass is assigned in loop 2, the assignment to a specific engine group doesn't
+                // matter. We assign it to the current group.
+                // This also includes decouplers only attached to only one side.
+                IF dbg { mLog("   Decoupler! Do not traverse."). }
                 // Do not traverse through decoupler.
                 SET stopWalk TO True.
             }
         }
 
-        IF thisEg {
-            procli:ADD(p:UID).
-            egli:ADD(p).
-            IF dbg { mLog(Ep_Decoupledin(p)+","+p:STAGE+","+p:TITLE+","+p:NAME+","+p:TYPENAME+","+l). }
+        IF p:TYPENAME = "DockingPort" AND p:HASMODULE("ModuleDockingNode") {
+            // Docking ports can act as decouplers. Treat them accordingly.
+            IF p:GETMODULE("ModuleDockingNode"):HASEVENT("port: disable staging") {
+                IF p:GETMODULE("ModuleDockingNode"):HASEVENT("disable crossfeed") {
+                    // One engine group, just traverse through it.
+                    IF dbg { mLog("   Traversing through docking port. Crossfeed enabled"). }
+                } ELSE {
+                    IF dbg { mLog("   Docking port with staging on and crossfeed off! Do not traverse."). }
+                    SET stopWalk TO True.
+                }
+            }
         }
+
+        // Add part to this eg
+        procli:ADD(p:UID).
+        egli:ADD(p).
+        IF dbg { mLog(Ep_Decoupledin(p)+","+p:STAGE+","+p:TITLE+","+p:NAME+","+p:TYPENAME+","+l). }
 
         // The following parts have no Crossfeed. Stop the "walk" here.
         IF nocflist:CONTAINS(p:NAME) {
@@ -1455,7 +1475,7 @@ FUNCTION stinfo {
 
         // Engine plates are problematic. See "Problems and additional considerations" at the beginning
         // of the file. Use the following approach:
-        // If the part is an engine plate, first check if the [dependent]:DECOUPLED value is the same as
+        // If the part is an engine plate, first check if the [dependent]:DECOUPLER value is the same as
         // the engime plates value. If yes, they are in the same eg. (The "top" node is correct). Otherwise
         // for engine plates going to attached parts check the following 3 conditions in that order:
         // If the dependent part has/is ..
