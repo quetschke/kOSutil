@@ -389,12 +389,15 @@ FUNCTION stinfo {
         IF p:TYPENAME = "Decoupler" {
             // Decouplers and separators have only mass prior to being activated,
             // they stay on without mass.
-            IF p:NAME:STARTSWITH("Separator") OR p:NAME:STARTSWITH("Decoupler")
+            IF p:NAME:STARTSWITH("Decoupler")
                OR p:NAME:STARTSWITH("radialDe") OR p:NAME:STARTSWITH("smallHard")
                OR p:NAME:STARTSWITH("structuralPyl") {
                 // Warning! The script assumes that lower/later stages loose the mass. It cannot detect if
                 // a decoupler is mounted upside down. Use kOS tag "reverse" to guide the script.
                 SET is_decoup TO 1.
+            } ELSE IF p:NAME:STARTSWITH("Separator") {
+                // Separators always loose their mass upon decoupling
+                SET is_decoup TO 2.
             } ELSE IF p:NAME:STARTSWITH("EnginePlate") {
                 // Engine plates keep their mass, unless reversed.
                 SET is_decoup TO -1.
@@ -427,6 +430,9 @@ FUNCTION stinfo {
             IF is_decoup = 1 {
                 // Mass normally gets decoupled
                 IF NOT is_reverse { SET kst TO ast+1. }
+            } ELSE IF is_decoup = 2 {
+                // Mass always gets decoupled
+                SET kst TO ast+1.
             } ELSE {
                 // Mass normally stays
                 IF is_reverse { SET kst TO ast+1. }
