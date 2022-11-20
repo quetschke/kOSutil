@@ -1,6 +1,6 @@
 // LauIn.ks - Launch in number of minutes script
 // Copyright © 2021, 2022 V. Quetschke
-// Version 0.12, 10/17/2022
+// Version 0.13, 11/19/2022
 @LAZYGLOBAL OFF.
 
 // Launch into target orbit in given number of minutes, with an optional parameter to launch a given number
@@ -90,22 +90,24 @@ WHEN DEFINED runLauIn then {
 	RETURN runLauIn.  // Removes the trigger when running is false
 }
 
+// Warp!
 SET KUNIVERSE:TIMEWARP:MODE TO "rails".
+LOCAL WarpEnd TO lautime.  // Time to end of timewarp
 
-PRINT "Warping.                                  " at (0,11).
+PRINT "Warping. Press 'delete' to abort, 'w' to restart warp.           " at (0,11).
 // WARPTO controls TIMEWARP:RATE, do it manually. You cannot change the rate during WARPTO.
-//KUNIVERSE:TIMEWARP:WARPTO(lautime-WarpStopTime).
+//KUNIVERSE:TIMEWARP:WARPTO(WarpEnd-WarpStopTime).
 
-// Better warp stopping/restaring.
-LOCAL gtime TO (lautime-WarpStopTime-TIME:SECONDS).
+// Better warp stopping/restarting.
+LOCAL gtime TO (WarpEnd-WarpStopTime-TIME:SECONDS).
 LOCAL rtime TO 0.
 // Set rate for warp so that gametime passes in 1s real time.
 LOCAL qrate TO MAX(10^FLOOR(LOG10(gtime)),1). // Rounding to 10^n leads to 1s to 9.99s real time.
 SET KUNIVERSE:TIMEWARP:RATE TO qrate.
 WAIT UNTIL KUNIVERSE:TIMEWARP:RATE / qrate > 0.5. // Wait until the rate is mostly adjusted
 
-UNTIL TIME:SECONDS > lautime-WarpStopTime {
-    SET gtime TO (lautime-WarpStopTime-TIME:SECONDS). // Remaining time in game sec.
+UNTIL TIME:SECONDS > WarpEnd-WarpStopTime {
+    SET gtime TO (WarpEnd-WarpStopTime-TIME:SECONDS). // Remaining time in game sec.
     SET rtime TO gtime/KUNIVERSE:TIMEWARP:RATE. // Remaining time in real sec.
     PRINT "Est. real time:"+nuform(rtime,5,1)+"s" at (0,12).
     PRINT "Current/target warp rate:"+nuform(KUNIVERSE:TIMEWARP:RATE,7,0)
@@ -115,6 +117,22 @@ UNTIL TIME:SECONDS > lautime-WarpStopTime {
     IF KUNIVERSE:TIMEWARP:RATE / qrate > 3 {
         SET KUNIVERSE:TIMEWARP:RATE TO qrate.
     }
+    // Abort or restart warp
+    IF TERMINAL:INPUT:HASCHAR {
+        LOCAL input TO TERMINAL:INPUT:GETCHAR().
+        IF input = TERMINAL:INPUT:DELETERIGHT {
+            PRINT " ".
+            PRINT "Aborted LauIN.ks ..".
+            PRINT " ".
+            PRINT " ".
+            PRINT 1/0.
+        } ELSE IF input = "w" {
+            // Only needed to recalculate if a long enough time passed to change qrate.
+            SET qrate TO MAX(10^FLOOR(LOG10(gtime)),1).
+            SET KUNIVERSE:TIMEWARP:RATE TO qrate.
+            PRINT "Restarted warping. Press 'delete' to abort, 'w' to restart warp." at (0,11).
+        }
+    }
     IF rtime < 0.8 { // Threshold
         // Only re-calculate qrate when realtime gets to the threshold.
         SET qrate TO MAX(10^FLOOR(LOG10(gtime)),1). // For threshold < 1s, this leads to 9.9s or less.
@@ -123,9 +141,6 @@ UNTIL TIME:SECONDS > lautime-WarpStopTime {
             // Debug output
             //PRINT "qr:"+nuform(qrate,7,0)+" ra:"+nuform(KUNIVERSE:TIMEWARP:RATE,7,0)+" rt:"+nuform(rtime,5,2).
             WAIT UNTIL KUNIVERSE:TIMEWARP:RATE / qrate < 2. // Wait until the rate is mostly adjusted
-            //SET gtime TO (lautime-WarpStopTime-TIME:SECONDS). // Remaining time in game sec.
-            //SET rtime TO gtime/KUNIVERSE:TIMEWARP:RATE. // Remaining time in real sec.
-            //PRINT "           ra:"+nuform(KUNIVERSE:TIMEWARP:RATE,7,0)+" rt:"+nuform(rtime,5,2).
         }
     }
 }
