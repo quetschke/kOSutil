@@ -1,6 +1,6 @@
 // LauIn.ks - Launch in number of minutes script
 // Copyright © 2021, 2022 V. Quetschke
-// Version 0.13, 11/19/2022
+// Version 0.14, 11/20/2022
 @LAZYGLOBAL OFF.
 
 // Launch into target orbit in given number of minutes, with an optional parameter to launch a given number
@@ -62,14 +62,12 @@ SET lauLAN TO MOD(lauLAN,360). // This limits lauLAN to (-360,360).
 IF lauLAN < 0 { SET lauLAN TO lauLAN+360. }
 LOCAL lauLAN2 TO CHOOSE lauLAN -180 IF lauLAN > 180 ELSE lauLAN + 180.
 
-// Find ejection angle from time to launch
-LOCAL LauEject TO (180+90-SHIP:LONGITUDE) - InMinutes/deg2min - MOD(now,21600)/60*deg2min.
+// Find ejection angle from time to launch - See LauEject with laudeg=0, solve for ejectAng.
+LOCAL LauEject TO (180-SHIP:LONGITUDE+90) - InMinutes/deg2min - MOD(now,21600)/60/deg2min.
 SET LauEject TO MOD(LauEject,360). // This limits LauEject to (-360,360).
 IF LauEject < -180 { SET LauEject TO LauEject+360. }
 IF LauEject > 180 { SET LauEject TO LauEject-360. }
 LOCAL LauEject2 TO CHOOSE LauEject -180 IF LauEject > 0 ELSE LauEject + 180.
-
-//PRINT (180+90-SHIP:LONGITUDE) - lauminutes/deg2min - MOD(now,21600)/60*deg2min.
 
 // Fill in static info
 PRINT nuform(lauLAN,4,2)+" / "+nuform(lauLAN2,4,2)+" deg" at(20,2).
@@ -144,7 +142,7 @@ UNTIL TIME:SECONDS > WarpEnd-WarpStopTime {
         }
     }
 }
-PRINT "Stopped Warp ...                         " at (0,11).
+PRINT "Stopped Warp ...                                                " at (0,11).
 
 // Make sure the warp has stopped
 WAIT UNTIL KUNIVERSE:TIMEWARP:ISSETTLED.
