@@ -1,6 +1,6 @@
 // Align.ks - Align the craft for solar panel exposure
 // Copyright © 2021, 2022 M. Aben, V. Quetschke
-// Version 0.3, 06/26/2022
+// Version 0.4, 11/25/2022
 //
 // This script is based on a version from Mike Aben in https://github.com/MikeAben64/kOS-Scripts .
 // https://github.com/MikeAben64/kOS-Scripts/blob/main/align.ks
@@ -10,9 +10,10 @@
 // DESCRIPTION:
 // Orients vessel for ideal solar panel exposure.
 // Take a parameter for the orientation of the vessel:
-//  'n' - normal, nose up
-//  'd' - dorsal, top up
-//  'w' - wing, right side up (dorsal+90deg))
+//  'n' - normal, nose up - pointing north.
+//  'd' - dorsal, top up, nose pointing perpendicular to north.
+//  'w' - wing, right side up (dorsal+90 deg))
+//  deg - dorsal + deg - turn along nose axis by deg degrees.
 // The program watits for minimal deviation from the value set vor steering using an eponential moving
 // or can be exited through pressing 'delete'.
 
@@ -29,6 +30,9 @@ FUNCTION main {
         LOCK STEERING to HEADING(0, SHIP:GEOPOSITION:LAT - 90) + R(0, 0, 0).
     } ELSE IF (orientation = "w") {
         LOCK STEERING to HEADING(0, SHIP:GEOPOSITION:LAT - 90) + R(0, 0, 90).
+    } ELSE IF (orientation:TYPENAME = "Scalar") {
+        LOCAL myRot TO MOD(orientation,360).
+        LOCK STEERING to HEADING(0, SHIP:GEOPOSITION:LAT - 90) + R(0, 0, myRot).
     } ELSE {
         LOCK STEERING to HEADING(0, SHIP:GEOPOSITION:LAT) + R(0, 0, 0).
     }
