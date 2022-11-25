@@ -1,6 +1,6 @@
 // xm2.ks - Execute maneuver node script
 // Copyright © 2021, 2022 V. Quetschke
-// Version 0.7.4, 10/31/2022
+// Version 0.7.5, 11/25/2022
 @LAZYGLOBAL OFF.
 
 // Store current IPU value.
@@ -248,6 +248,7 @@ WHEN defined runXMN then {
     PRINT ROUND(BL,1)+"s   " at (27,5).
     PRINT ROUND(BL2,1)+"s   " at (27,6).
     PRINT ROUND((TIME:SECONDS-loopTime)*1000,1)+"   " AT (22,7).
+    // Todo: When burning in atmosphere stageThrust can changed. See Ascent.ks.
     SET loopTime TO TIME:SECONDS.
     RETURN runXMN.  // Removes the trigger when runXMN is false
 }
@@ -278,7 +279,8 @@ LOCAL rtime TO 0.
 // Set rate for warp so that gametime passes in 1s real time.
 LOCAL qrate TO MAX(10^FLOOR(LOG10(gtime)),1). // Rounding to 10^n leads to 1s to 9.99s real time.
 SET KUNIVERSE:TIMEWARP:RATE TO qrate.
-WAIT UNTIL KUNIVERSE:TIMEWARP:RATE / qrate > 0.5. // Wait until the rate is mostly adjusted
+// Wait until the rate is mostly adjusted
+WAIT UNTIL KUNIVERSE:TIMEWARP:ISSETTLED OR (KUNIVERSE:TIMEWARP:RATE / qrate > 0.5).
 
 UNTIL TIME:SECONDS > WarpEnd-WarpStopTime {
     SET gtime TO (WarpEnd-WarpStopTime-TIME:SECONDS). // Remaining time in game sec.
@@ -312,12 +314,8 @@ UNTIL TIME:SECONDS > WarpEnd-WarpStopTime {
         SET qrate TO MAX(10^FLOOR(LOG10(gtime)),1). // For threshold < 1s, this leads to 9.9s or less.
         IF KUNIVERSE:TIMEWARP:RATE / qrate > 2 { // The WAIT UNTIL below assures this is only executed once.
             SET KUNIVERSE:TIMEWARP:RATE TO qrate.
-            // Debug output
-            //PRINT "qr:"+nuform(qrate,7,0)+" ra:"+nuform(KUNIVERSE:TIMEWARP:RATE,7,0)+" rt:"+nuform(rtime,5,2).
-            WAIT UNTIL KUNIVERSE:TIMEWARP:RATE / qrate < 2. // Wait until the rate is mostly adjusted
-            //SET gtime TO (WarpEnd-WarpStopTime-TIME:SECONDS). // Remaining time in game sec.
-            //SET rtime TO gtime/KUNIVERSE:TIMEWARP:RATE. // Remaining time in real sec.
-            //PRINT "           ra:"+nuform(KUNIVERSE:TIMEWARP:RATE,7,0)+" rt:"+nuform(rtime,5,2).
+            // Wait until the rate is mostly adjusted
+            WAIT UNTIL KUNIVERSE:TIMEWARP:ISSETTLED OR (KUNIVERSE:TIMEWARP:RATE / qrate < 2).
         }
     }
 }
