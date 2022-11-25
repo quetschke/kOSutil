@@ -1,6 +1,6 @@
 // Ascent.ks - Ascent script
 // Copyright © 2021, 2022 V. Quetschke
-// Version 0.42 - 10/17/2022
+// Version 0.43 - 10/29/2022
 @LAZYGLOBAL OFF.
 
 DECLARE PARAMETER
@@ -20,6 +20,8 @@ PRINT " | Pitch angle:                                     | ".
 PRINT " | Angle of Att.:                                   | ".
 PRINT " +--------------------------------------------------+ ".
 PRINT " ".
+
+LOCAL launchAlt TO ALT:RADAR. // Altitude at launch
 
 LOCAL lBody TO BODY:NAME. // Local body we launch from.
 
@@ -67,12 +69,12 @@ LOCAL mydorsal TO VXCL(myup,mytop).
 LOCAL TopBearing TO ARCTAN2(VDOT(mydorsal,myeast),VDOT(mydorsal,mynorth)).
 // This angle is used to avoid rolling of the vessel upon launch. 
 
-LOCAL launchAlt TO ALT:RADAR. // Altitude at launch
-
 // Use positive inclinations only
 LOCAL ANDN IS 1.
+LOCAL ANDNtxt IS "AN".
 IF targetIncl < 0 {
     SET ANDN TO -1.
+    SET ANDNtxt TO "DN".
     SET targetIncl TO -targetIncl.
 }
 
@@ -148,8 +150,8 @@ LOCAL aAttack IS 0.
 LOCAL tPitch TO 0.
 
 FUNCTION targetPitch {
-    // Use MJs formula - adjust for launch altitude
-    SET tPitch TO 90 - (( (ALTITUDE-launchAlt-actualTurnStart)/(turnEnd-actualTurnStart))^turnShapeExponent )*90.
+    // Use MJs formula icluding launch altitude. Avoid negative pitches, set minimum.
+    SET tPitch TO MAX(90 - (( (ALTITUDE-launchAlt-actualTurnStart)/(turnEnd-actualTurnStart))^turnShapeExponent )*90,5).
 
     // pitch angle - does not measure azimuth:
     LOCAL cPitch TO 90-VANG(SHIP:UP:VECTOR,SHIP:SRFPROGRADE:VECTOR).
@@ -168,21 +170,27 @@ FUNCTION targetPitch {
     RETURN tPitch.
 }
 
+LOCAL stageThrust TO 0. // Needed for auto-staging
+
 LOCAL loopTime IS TIME:SECONDS.
 //display info
 when defined runAscent then {
-    PRINT nuform(SHIP:ORBIT:INCLINATION,4,2)+" deg" at(20,2).
+    PRINT nuform(SHIP:ORBIT:INCLINATION,4,2)+" deg ("+ANDNtxt+")" at(20,2).
     PRINT nuform(targetIncl*ANDN,4,2)+" deg ("+nuform(SHIP:LATITUDE,3,1)+" deg lat.)" at(20,3).
     PRINT nuform(iAzimuth,4,4)+" deg" at(20,4).
     PRINT nuform(corrAzi,4,4)+" deg" at(20,5).
     PRINT nuform(tPitch,4,4)+" deg" at(20,6).
     PRINT nuform(aAttack,4,4)+" deg" at(20,7).
     PRINT nuform((TIME:SECONDS-loopTime)*1000,5,1) AT (22,8).
+    IF MAXTHRUST > stageThrust { // Thrust grows when the fuel gets lower and the altitude gets higher
+        SET stageThrust TO MAXTHRUST.
+    }
     SET loopTime TO TIME:SECONDS.
     RETURN runAscent.  // Removes the trigger when running is false
 }
 
 SAS OFF.
+
 LOCK THROTTLE TO 1.
 LOCAL launchTime TO TIME:SECONDS.
 
@@ -195,7 +203,6 @@ UNTIL MAXTHRUST > 0 {
 
 //staging
 LOCAL n to 1.
-LOCAL stageThrust to MAXTHRUST.
 LOCAL cTWR TO AVAILABLETHRUST/SHIP:MASS/CONSTANT:g0. // Kerbin TWR
 PRINT "Stage "+n+" running. AVAILABLETHRUST: "+round(AVAILABLETHRUST,0)+" kN.".
 PRINT "                 TWR: "+round(cTWR,2).
