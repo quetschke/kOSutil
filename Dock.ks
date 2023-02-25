@@ -1,6 +1,6 @@
 // dock.ks - Dock at target
 // Copyright © 2023 V. Quetschke
-// Version 0.3, 02/24/2023
+// Version 0.4, 02/25/2023
 @LAZYGLOBAL OFF.
 
 // Docking script that uses RCS to dock with a target docking port.
@@ -188,6 +188,7 @@ IF rcsfuel = 0 AND MAXTHRUST = 0 {
     UNTIL STAGE:READY { WAIT 0. }
     //SET rcsfuel TO STAGE:RESOURCESLEX["MonoPropellant"]:AMOUNT.
     // If it is still 0, we probaly have other issues.
+    WAIT 1. // Wait a bit to have the texts on the sceen before it vanishes.
 }
 
 LOCAL HasWarning TO FALSE. // Shows warnings for 2s if warnings are found.
@@ -334,8 +335,8 @@ IF HasWarning {
     VO:PLAY(vTick).
     WAIT 2.
     VO:PLAY(vTick).
-    CLEARSCREEN.
 }
+CLEARSCREEN.
 //#close RCS parameters
 
 // Vessel statistics output #open
