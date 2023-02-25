@@ -57,6 +57,11 @@ The ``xm2.ks`` script uses the ``sinfo.ks`` library to calculate the cummulative
      Syntax: ``run LauEject(targetAltkm=80,targetIncl=5,ejectAng=5).``
 
 
+### Script to automatically dock to another vessel
+- ``Dock.ks``    Script to dock automatically.
+
+The ``Dock.ks`` script needs the vessels to be within docking range (200m). The docking port needs to be active with ``Control from here`` and the target docking port needs to be selected with ``Set as Target`` on the other vessel.
+
 ### Script to very precisely set the Orbital Period of a craft
 - ``SetPeriod.ks``    Script to adjust orbital period.
 
