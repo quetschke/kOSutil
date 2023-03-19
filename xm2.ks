@@ -1,6 +1,6 @@
 // xm2.ks - Execute maneuver node script
-// Copyright © 2021, 2022 V. Quetschke
-// Version 0.7.5, 11/25/2022
+// Copyright © 2021, 2022, 2023 V. Quetschke
+// Version 0.7.6, 03/19/2023
 @LAZYGLOBAL OFF.
 
 // Store current IPU value.
@@ -10,7 +10,11 @@ SET CONFIG:IPU TO 2000. // Makes the timing a little better.
 
 // The xm2 scrip uses RCS if it is availabel. It does not enable or disable the RCS status.
 
-SET THROTTLE TO 0. // Making sure throttle is off
+// Sometimes the engines pulse when locking the throttle to 0. Maybe this prevents that.
+WAIT 0.
+SET SHIP:CONTROL:PILOTMAINTHROTTLE TO 0.
+
+LOCK THROTTLE TO 0. // Making sure throttle is off
 RUNONCEPATH("libcommon").
 
 LOCAL WarpStopTime to 3. //custom value
@@ -20,12 +24,12 @@ LOCAL WarpStopTime to 3. //custom value
 // Have a place for a fudge factor.
 LOCAL StagingDur TO 0.58+0.01+0. // Possible fudge factor.
 
-LOCAL Node to NEXTNODE.
+LOCAL MyNode to NEXTNODE.
 
 LOCAL BurnDur TO -1. // Burn time for the delta V.
 LOCAL BurnDur2 TO -1. // Burn time for half the delta V.
 LOCAL TLimit TO 1. // Used to implement throttle limit for short burns
-LOCAL NodedV0 to Node:DELTAV.
+LOCAL NodedV0 to MyNode:DELTAV.
 LOCAL BurnDV TO 0. // This should become the same as NodedV0, but pieced together.
 LOCAL sISP TO getISP(). // Current stage ISP
 
@@ -48,7 +52,7 @@ PRINT " ".
 // Sanity checks
 
 // Check if rocket has enough delta v for maneuver
-IF Node:BURNVECTOR:MAG > SHIP:DELTAV:CURRENT {
+IF MyNode:BURNVECTOR:MAG > SHIP:DELTAV:CURRENT {
     PRINT "".
     PRINT "Not enough delta v to complete node! Abort!".
     SET axx TO 1/0.
@@ -109,15 +113,15 @@ FROM {local s is 0.} UNTIL s > STAGE:NUMBER STEP {set s to s+1.} DO {
 }
 
 // This part doesn't use TLimit
-IF Node:BURNVECTOR:MAG < SHIP:STAGEDELTAV(SHIP:STAGENUM):CURRENT {
+IF MyNode:BURNVECTOR:MAG < SHIP:STAGEDELTAV(SHIP:STAGENUM):CURRENT {
     PRINT " ".
     PRINT "Single stage maneuver node!".
-    SET BurnDur2 TO BurnTimeP(MASS,Node:BURNVECTOR:MAG/2,sISP,AVAILABLETHRUST).
+    SET BurnDur2 TO BurnTimeP(MASS,MyNode:BURNVECTOR:MAG/2,sISP,AVAILABLETHRUST).
     SET CanThrottle TO TRUE.
-} ELSE IF Node:BURNVECTOR:MAG / 2 < SHIP:STAGEDELTAV(SHIP:STAGENUM):CURRENT {
+} ELSE IF MyNode:BURNVECTOR:MAG / 2 < SHIP:STAGEDELTAV(SHIP:STAGENUM):CURRENT {
     PRINT " ".
     PRINT "Multi stage maneuver with more than half of the DV in the current stage!".
-    SET BurnDur2 TO BurnTimeP(MASS,Node:BURNVECTOR:MAG/2,sISP,AVAILABLETHRUST).
+    SET BurnDur2 TO BurnTimeP(MASS,MyNode:BURNVECTOR:MAG/2,sISP,AVAILABLETHRUST).
 } ELSE {
     LOCAL cumDV TO 0.
     LOCAL cumTi TO 0.
@@ -125,12 +129,12 @@ IF Node:BURNVECTOR:MAG < SHIP:STAGEDELTAV(SHIP:STAGENUM):CURRENT {
     PRINT "Multi stage maneuver with less than half of the DV in the current stage!".
     LOCAL s TO STAGE:NUMBER.
     // Prediction for half the burn time:
-    UNTIL cumDV > Node:BURNVECTOR:MAG/2 {
+    UNTIL cumDV > MyNode:BURNVECTOR:MAG/2 {
         IF s < 0 { SET axx TO 1/0. } // Shouldn't happen - sanity check
-        LOCAL lastDV TO Node:BURNVECTOR:MAG/2 - cumDV.
+        LOCAL lastDV TO MyNode:BURNVECTOR:MAG/2 - cumDV.
         SET cumDV TO cumDV + si[s]:VdV.
         //PRINT lastDV.
-        IF cumDV < Node:BURNVECTOR:MAG/2 {
+        IF cumDV < MyNode:BURNVECTOR:MAG/2 {
             // Not the final stage
             SET cumTi TO cumTi + si[s]:dur + StagingDur.
         } ELSE {
@@ -152,11 +156,11 @@ IF Node:BURNVECTOR:MAG < SHIP:STAGEDELTAV(SHIP:STAGENUM):CURRENT {
     LOCAL cumDVb TO 0. // Total dV in node
     LOCAL s TO STAGE:NUMBER.
     // Prediction for the burn time:
-    UNTIL cumDV > Node:BURNVECTOR:MAG {
-        LOCAL lastDV TO Node:BURNVECTOR:MAG - cumDV.
+    UNTIL cumDV > MyNode:BURNVECTOR:MAG {
+        LOCAL lastDV TO MyNode:BURNVECTOR:MAG - cumDV.
         SET cumDV TO cumDV + si[s]:VdV.
         //PRINT lastDV.
-        IF cumDV < Node:BURNVECTOR:MAG {
+        IF cumDV < MyNode:BURNVECTOR:MAG {
             // Not the final stage
             SET cumTi TO cumTi + si[s]:dur + StagingDur.
             SET BurnDV TO cumDV.
@@ -210,7 +214,7 @@ FUNCTION getISP {
 FUNCTION BurnTimeC {
     //PARAMETER mNode.
     LOCAL bTime to -1.
-    LOCAL delV TO MIN(Node:BURNVECTOR:MAG,STAGE:DELTAV:CURRENT).
+    LOCAL delV TO MIN(MyNode:BURNVECTOR:MAG,STAGE:DELTAV:CURRENT).
     LOCAL cMass TO MASS. // Current mass
     LOCAL eMass to cMass / (CONSTANT:E^(delV/sISP/CONSTANT:g0)).
     // checking to make sure engines haven't flamed out
@@ -243,8 +247,8 @@ WHEN defined runXMN then {
     LOCAL BL IS BurnTimeC().
     LOCAL BL2 IS CHOOSE BL/THROTTLE IF THROTTLE > 0 ELSE 0.
     PRINT ROUND(NodedV0:MAG,1)+" m/s   " at (27,2).
-    PRINT ROUND(Node:DELTAV:MAG,1)+" m/s   " at (27,3).
-    PRINT ROUND(Node:eta - BurnDur2)+"s   " at (27,4).
+    PRINT ROUND(MyNode:DELTAV:MAG,1)+" m/s   " at (27,3).
+    PRINT ROUND(MyNode:eta - BurnDur2)+"s   " at (27,4).
     PRINT ROUND(BL,1)+"s   " at (27,5).
     PRINT ROUND(BL2,1)+"s   " at (27,6).
     PRINT ROUND((TIME:SECONDS-loopTime)*1000,1)+"   " AT (22,7).
@@ -256,13 +260,13 @@ WHEN defined runXMN then {
 //RCS ON.
 SAS OFF.
 LOCK THROTTLE TO 0.
-LOCK STEERING TO Node:DELTAV.
-LOCAL NodeTime TO Node:TIME.
+LOCK STEERING TO MyNode:DELTAV.
+LOCAL NodeTime TO MyNode:TIME.
 
 // Before warping let's point in the right direction.
 // WAIT UNTIL VANG(SHIP:FACING:FOREVECTOR,STEERING) <  1.
 WAIT 0.05. // Steeringmanager needs some time to initialize.
-WAIT UNTIL ABS(SteeringManager:ANGLEERROR) + ABS(SteeringManager:ROLLERROR) < 2.
+WAIT UNTIL ABS(SteeringManager:ANGLEERROR) < 2. // We don't care about SteeringManager:ROLLERROR
 
 // Warp!
 SET KUNIVERSE:TIMEWARP:MODE TO "rails".
@@ -369,7 +373,7 @@ WHEN MAXTHRUST<stageThrust THEN { // No more fuel?
               "TWR: "+round(cTWR,2).
         SET stageThrust to MAXTHRUST.
         // Allow extended final burn
-        IF Node:BURNVECTOR:MAG < STAGE:DELTAV:CURRENT {
+        IF MyNode:BURNVECTOR:MAG < STAGE:DELTAV:CURRENT {
             SET CanThrottle TO TRUE.
         }
         LOCK THROTTLE TO TLimit.
@@ -404,7 +408,7 @@ PRINT "Set throttle to 100%".
 
 // Measure how close we got to NodeTime
 WAIT UNTIL TIME:SECONDS > NodeTime.
-LOCAL NodeDV2 TO Node:DELTAV:MAG. // Remaining delta V
+LOCAL NodeDV2 TO MyNode:DELTAV:MAG. // Remaining delta V
 PRINT "Remaining DV at node time: "+nuform(100*NodeDV2 / NodedV0:MAG,2,2)+"%".
 PRINT "Est. burn time to Node:    "+nuform(BurnDur2,2,2)+"s".
 PRINT "Missed by:                 "+nuform((0.5-NodeDV2/NodedV0:MAG)*2*BurnDur2,2,2)+"s".
@@ -427,9 +431,9 @@ PRINT " ".
 
 
 // Me:
-WAIT UNTIL VDOT(NodedV0, Node:DELTAV) < 0.
+WAIT UNTIL VDOT(NodedV0, MyNode:DELTAV) < 0.
 // M. Aben:
-//WAIT UNTIL VANG(NodedV0, Node:DELTAV) > 3.5.
+//WAIT UNTIL VANG(NodedV0, MyNode:DELTAV) > 3.5.
 
 LOCK THROTTLE TO 0.
 PRINT "Burn completed!".
@@ -440,7 +444,7 @@ UNLOCK STEERING.
 LOCK THROTTLE TO 0. UNLOCK THROTTLE.
 SET runXMN TO FALSE.
 WAIT 0.03.
-REMOVE NODE.
+REMOVE MyNode.
 
 SET SHIP:CONTROL:PILOTMAINTHROTTLE TO 0.
 
