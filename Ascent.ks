@@ -1,6 +1,6 @@
 // Ascent.ks - Ascent script
-// Copyright © 2021, 2022 V. Quetschke
-// Version 0.43 - 10/29/2022
+// Copyright © 2021, 2022, 2023 V. Quetschke
+// Version 0.44 - 03/19/2023
 @LAZYGLOBAL OFF.
 
 DECLARE PARAMETER
@@ -28,7 +28,7 @@ LOCAL lBody TO BODY:NAME. // Local body we launch from.
 // Some local variables
 LOCAL actualTurnStart to 1000. // Starting height for the turn.
 LOCAL turnStartVel to 100.     // Minimum velocity for the turn.
-LOCAL turnEnd to 60000. // Kerbin 
+LOCAL turnEnd to 60000. // Kerbin
 LOCAL turnShapeExponent to 0.4.
 LOCAL maxAAttack TO 5.  // Limit the maximum angle of attack
 
@@ -36,7 +36,7 @@ LOCAL maxAAttack TO 5.  // Limit the maximum angle of attack
 IF lBody:STARTSWITH("Mu") {
     SET actualTurnStart to 10. // Starting height for the turn.
     SET turnStartVel to 5.     // Minimum velocity for the turn.
-    SET turnEnd to 10000. // Mun 
+    SET turnEnd to 10000. // Mun
     SET turnShapeExponent to 0.2.
     SET maxAAttack TO 45.
 }
@@ -54,6 +54,22 @@ ELSE IF lBody:STARTSWITH("Du") {
     SET maxAAttack TO 45.
     PRINT "Duna".
 }
+ELSE IF lBody:STARTSWITH("Ike") {
+    SET actualTurnStart to 10. // Starting height for the turn.
+    SET turnStartVel to 5.     // Minimum velocity for the turn.
+    SET turnEnd to 20000. // Ike
+    SET turnShapeExponent to 0.2.
+    PRINT "Ike".
+}
+ELSE IF lBody:STARTSWITH("Ev") {
+    SET actualTurnStart to 35000. // Starting height for the turn.
+    SET launchAlt TO 0.           // Assume we launched at 0 for hoverlaunch
+    SET turnStartVel to 35.     // Minimum velocity for the turn.
+    SET turnEnd to 45000. // Eve
+    SET turnShapeExponent to 0.2.
+    SET maxAAttack TO 45.
+    PRINT "Eve".
+}
 
  // Roll correction to avoid rolling the rocket when launched. The value is calclated below.
 LOCAL rollCorrection TO 0. // Calculated below, based on TopBearing
@@ -67,7 +83,7 @@ LOCAL mytop TO SHIP:FACING:TOPVECTOR. // Roof of cockpit or probe
 LOCAL mydorsal TO VXCL(myup,mytop).
 // The bearing of the topside of the ship with respect to north.
 LOCAL TopBearing TO ARCTAN2(VDOT(mydorsal,myeast),VDOT(mydorsal,mynorth)).
-// This angle is used to avoid rolling of the vessel upon launch. 
+// This angle is used to avoid rolling of the vessel upon launch.
 
 // Use positive inclinations only
 LOCAL ANDN IS 1.
@@ -181,6 +197,7 @@ when defined runAscent then {
     PRINT nuform(corrAzi,4,4)+" deg" at(20,5).
     PRINT nuform(tPitch,4,4)+" deg" at(20,6).
     PRINT nuform(aAttack,4,4)+" deg" at(20,7).
+
     PRINT nuform((TIME:SECONDS-loopTime)*1000,5,1) AT (22,8).
     IF MAXTHRUST > stageThrust { // Thrust grows when the fuel gets lower and the altitude gets higher
         SET stageThrust TO MAXTHRUST.
@@ -192,6 +209,7 @@ when defined runAscent then {
 SAS OFF.
 
 LOCK THROTTLE TO 1.
+
 LOCAL launchTime TO TIME:SECONDS.
 
 // Clamps? Not a trigger!
@@ -199,6 +217,11 @@ UNTIL MAXTHRUST > 0 {
     PRINT "Pre-stage running. AVAILABLETHRUST: "+round(AVAILABLETHRUST,0)+" kN.".
     STAGE.
     UNTIL STAGE:READY { WAIT 0. }
+}
+
+// Special Duna/Ike treatment
+IF lBody:STARTSWITH("Du") OR lBody:STARTSWITH("Ike") {
+    AG6 ON. // Make sure solar panels are retracted. Otherwise this fails.
 }
 
 //staging
@@ -227,7 +250,7 @@ WHEN MAXTHRUST < stageThrust THEN { // No more fuel?
         PRINT "                 TWR: "+round(cTWR,2).
         SET stageThrust TO MAXTHRUST.
     }
-    RETURN true. 
+    RETURN true.
 }
 
 
@@ -241,12 +264,14 @@ LOCK STEERING TO heading(calAzi(SHIP:LATITUDE),90,rollCorrection).
 
 WAIT UNTIL SHIP:VELOCITY:SURFACE:MAG > turnStartVel.  // Minimum speed
 WAIT UNTIL ALTITUDE-launchAlt > actualTurnStart.  // Minimum altitude to start the turn
+PRINT "Turn started".
 
 // We could adjust rollCorrection dynamically to the calAzi value, but that deviation is small and gradual.
 LOCK STEERING TO HEADING(calAzi(SHIP:LATITUDE),targetPitch(),rollCorrection).
 
 // Burn until apoapsis is reached
 WAIT UNTIL SHIP:APOAPSIS > targetAlt.
+PRINT "Target apoapsis reached".
 
 // Engine cutoff and clean up
 LOCK THROTTLE TO 0.
@@ -268,7 +293,7 @@ IF SHIP:APOAPSIS < targetAlt*0.99 { // Avoid extra initions for Kerbalism!!
     WAIT UNTIL SHIP:APOAPSIS > targetAlt.
     LOCK THROTTLE TO 0.
     PRINT "Apoapsis corrected.".
-}    
+}
 
 UNLOCK STEERING. UNLOCK THROTTLE.
 SET runAscent TO false.
