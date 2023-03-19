@@ -1,6 +1,6 @@
 // sinfo.ks - Collect stage stats. Walk the tree starting from an engine recursively
 // Copyright © 2021, 2022, 2023 V. Quetschke
-// Version 0.9.4, 03/19/2023
+// Version 0.9.5, 03/19/2023
 @LAZYGLOBAL OFF.
 
 // Enabling dbg will create a logfile (0:sinfo.log) that can be used for
@@ -394,7 +394,7 @@ FUNCTION stinfo {
             // they stay on without mass.
             IF p:NAME:STARTSWITH("Decoupler")
                OR p:NAME:STARTSWITH("radialDe") OR p:NAME:STARTSWITH("smallHard")
-               OR p:NAME:STARTSWITH("structuralPyl") {
+               OR p:NAME:STARTSWITH("structuralPyl") OR p:NAME:STARTSWITH("HeatShield") {
                 // Warning! The script assumes that lower/later stages loose the mass. It cannot detect if
                 // a decoupler is mounted upside down. Use kOS tag "reverse" to guide the script.
                 SET is_decoup TO 1.
