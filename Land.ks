@@ -1,6 +1,6 @@
-// land.ks - Land at target
-// Copyright © 2021, 2022 V. Quetschke
-// Version 0.8, 10/17/2022
+// Land.ks - Land at target
+// Copyright © 2021, 2022, 2023 V. Quetschke
+// Version 0.10, 03/19/2023
 @LAZYGLOBAL OFF.
 
 // Script to land on the surface of a body.
@@ -11,13 +11,14 @@
 // If the script finds a maneuver node it executes it and then continues with the landing procedure. The
 // vessel waits until the estimated stopping distance is less than the remaining height to start the burn
 // but because the stopping distance depends on the angle the vessel has with UP, the engines sometimes need
-// to be stopped or throttled again. 
+// to be stopped or throttled again.
 
 DECLARE PARAMETER
     // Additional rotation. By default the vessel orients itself so that the top is facing north.
     // With 90 deg the top will face east.
     landRot IS 0,
-    WPpara IS TRUE. // True = use active WP, String = look for that WP, False = No WP.
+    // True = use active WP or not if none is active, String = look for that WP, False = No WP.
+    WPpara IS TRUE.
 
 RUNONCEPATH("libcommon").
 
@@ -50,11 +51,11 @@ LOCAL rollCorrection TO 0. // Calculated below, based on TopBearing
 // Vland to softly touch down.
 // The script approaches the ground in the following phases
 // 0. Find the critical angle (between down and the engine) where the vertical deceleration is 0.5 local
-//    body g (TWR_local = 1.5).  
+//    body g (TWR_local = 1.5).
 // 0a. Wait until the angle between down and the engine is XXdeg or less.
 // 0b. Wait until the needed distance to reach V0v is equal to the current altitude-h0, then go full throttle.
 // 1. Check if the stopDist is less than 90% the current altitude-h0. In that case throttle off until it
-//    is required to throttle up again. 
+//    is required to throttle up again.
 //    Disabled for now: Keep the trottle so that stopDist = trueRadar-h0 until we reach -V0v.
 // 2. Once the vertical speed is V0v adjust the trottle so that vertical speed is -V0v.
 //    When the craft reaches 1m shut the engine off.
@@ -124,12 +125,12 @@ IF WPpara:TYPENAME = "String" {
         }
     }
     IF myWP:TYPENAME = "Boolean" AND myWP = FALSE {
-        PRINT "Found no active waypoint. Abort!".
-        PRINT 1/0.
-    }
-    SET WPdist TO ROUND(myWP:GEOPOSITION:DISTANCE).
-    IF ADDONS:TR:AVAILABLE {
-        ADDONS:TR:SETTARGET(myWP:GEOPOSITION).
+        PRINT "Found no active waypoint. Do not use one!".
+    } ELSE {
+        SET WPdist TO ROUND(myWP:GEOPOSITION:DISTANCE).
+        IF ADDONS:TR:AVAILABLE {
+            ADDONS:TR:SETTARGET(myWP:GEOPOSITION).
+        }
     }
 } ELSE {
     PRINT "No waypoint target selected!".
@@ -148,13 +149,13 @@ IF HASNODE {
 // Main
 PRINT "3".
 VO:PLAY(vTick).
-WAIT 1. 
+WAIT 1.
 PRINT "2".
 VO:PLAY(vTick).
-WAIT 1. 
+WAIT 1.
 PRINT "1".
 VO:PLAY(vTick).
-WAIT 1. 
+WAIT 1.
 
 
 // Store current IPU value.
@@ -181,18 +182,18 @@ FUNCTION waitSteer {
     LOCAL k TO 1/6. // EMA parameter, to avoid overshooting look at average.
     UNTIL errorsig < 3 {
         WAIT 0.1.
-        SET errorsig TO errorsig*k + (ABS(SteeringManager:ANGLEERROR) + ABS(SteeringManager:ROLLERROR))*(1-k).
+        SET errorsig TO errorsig*(1-k) + (ABS(SteeringManager:ANGLEERROR) + ABS(SteeringManager:ROLLERROR))*k.
         //PRINT "Angle:       "+ROUND(eng2g0)+" - dev: "+ROUND(errorsig,1)+"      " AT(0,9).
         IF TERMINAL:INPUT:HASCHAR {
             IF TERMINAL:INPUT:GETCHAR() = TERMINAL:INPUT:DELETERIGHT {
                 SET errorsig TO 0.
                 PRINT "Aborted ..".
             }
-        }      
+        }
     }
 }
 
-// Use function and avoid rotation when we are close to landing (pointing up) ... 
+// Use function and avoid rotation when we are close to landing (pointing up) ...
 // LOCK mySteer TO ANGLEAXIS(yAng,SHIP:SRFRETROGRADE:TOPVECTOR)
                 // *ANGLEAXIS(-pAng,SHIP:SRFRETROGRADE:STARVECTOR)
                 // *SHIP:SRFRETROGRADE. // With pitch and yaw.
@@ -369,9 +370,7 @@ PRINT "-".
 // Display info
 LOCAL loopTime IS TIME:SECONDS.
 LOCAL runLA TO TRUE.
-// EMA on diff vector. Is this needed? TR jumps somewhat.
 LOCAL tarDiff TO V(0,0,0). // Starts with zero vector.
-//LOCAL d_ema TO 1/25. // 0.5s
 
 // TODO: Move text that doesn't change out of the trigger below.
 WHEN defined runLA then {
@@ -380,15 +379,13 @@ WHEN defined runLA then {
     PRINT ROUND(trueRadar2,1)+"m  " AT(22,8).
     PRINT "Bearing: "+ROUND(TopBearingA(),1)+"deg   " AT(40,7).
     PRINT "Cur. max decel: "+ROUND(MaxDecelA,1)+"m/s2     " AT(40,3).
-    
+
     IF useWP {
         PRINT "Target WP:   "+myWP:NAME AT (0,26).
         //PRINT "Dist:        "+ROUND(myWP:GEOPOSITION:DISTANCE)+"     " AT (0,27). // GEOPOSITION is at 0m
         //LOCAL ImpDist TO VDOT(ADDONS:TR:IMPACTPOS:POSITION,myImpDir).  // Distance to TR impact
         LOCAL ImpDist TO VDOT(myWP:POSITION,myImpDir).  // Distance to TR impact
         PRINT "Dist:        "+ROUND(myWP:POSITION:MAG)+"m   Horiz: "+ROUND(ImpDist,1)+"m     " AT (0,27).
-        // EMA for difference vector.
-        //SET tarDiff TO tarDiff*d_ema + (ADDONS:TR:IMPACTPOS:POSITION - myWP:POSITION)*(1-d_ema).
         IF ADDONS:TR:HASIMPACT {
             SET tarDiff TO ADDONS:TR:IMPACTPOS:POSITION - myWP:POSITION.
             PRINT "WP to Imp:   "+ROUND(tarDiff:MAG)+"m     " AT (0,28).
@@ -507,7 +504,7 @@ UNTIL SHIP:VERTICALSPEED >= -V0v {
     SET VSpeed TO SHIP:VERTICALSPEED.
 
     LOCAL sheight TO trueRadar-h0.
-    
+
     // ImpLeft positive need negatve yaw to correct
     LOCAL yLimit TO MIN((trueRadar-h0)/100, maxAng).
     IF ABS(-ImpLeft/10) > yLimit {
@@ -536,7 +533,7 @@ UNTIL SHIP:VERTICALSPEED >= -V0v {
     //  LOCAL newDec TO (SHIP:VERTICALSPEED^2 - V0v^2) / (2*sheight).
     //  SET tset TO (newDec+g_body)/(COS(eng2g0)*SHIP:AVAILABLETHRUST / SHIP:MASS).
     //}
-    
+
     //PRINT "Stopdist:    "+ROUND(stopDist)+"      " AT(0,17).
     PRINT "Stopdist:    "+ROUND(stopDist)+"m T:"+ROUND(stopTime)+"s      " AT(0,17).
     PRINT "Deltadist:   "+ROUND(sheight-stopDist,2)+" to h0 " AT(0,18).
