@@ -1,6 +1,6 @@
 // sinfo.ks - Collect stage stats. Walk the tree starting from an engine recursively
-// Copyright © 2021, 2022 V. Quetschke
-// Version 0.9.3, 11/11/2022
+// Copyright © 2021, 2022, 2023 V. Quetschke
+// Version 0.9.4, 03/19/2023
 @LAZYGLOBAL OFF.
 
 // Enabling dbg will create a logfile (0:sinfo.log) that can be used for
@@ -257,6 +257,9 @@ FUNCTION stinfo {
     LOCAL actfdstart TO LIST(). // List of eg that have no incoming fd.
     LOCAL actfdend TO LIST().   // List of eg that have no outgoing fd.
 
+    // Since kOS 1.4.0 TYPENAME changed from "decoupler" to "separator" for some (or all) decouplers.
+    LOCAL dectyp TO LIST("decoupler", "separator").
+
     // Fairings with panel mass - expand later for non-stock parts
     LOCAL fairingmass TO LEXICON(
         "fairingSize1", 0.075,  // AE-FF1
@@ -386,7 +389,7 @@ FUNCTION stinfo {
 
         // 1 = mass normally stays with decoupled (earlier) stage, -1 = mass stays with the next stage.
         LOCAL is_decoup TO 0.
-        IF p:TYPENAME = "Decoupler" {
+        IF dectyp:CONTAINS(p:TYPENAME) {
             // Decouplers and separators have only mass prior to being activated,
             // they stay on without mass.
             IF p:NAME:STARTSWITH("Decoupler")
@@ -1390,7 +1393,7 @@ FUNCTION stinfo {
                 l.      // Recursion level, child increases, parent decreases. Only for info.
 
         IF procli:CONTAINS(p:UID) {
-            //PRINT "Already processed! Skipped ..".
+            IF dbg { mLog("   - Already processed!"). }
             RETURN False.
         }
 
@@ -1432,7 +1435,7 @@ FUNCTION stinfo {
             }
         }
 
-        IF p:TYPENAME = "Decoupler" {
+        IF dectyp:CONTAINS(p:TYPENAME) {
             IF p:NAME:STARTSWITH("EnginePlate") {
                 // Engine plates don't have a ModuleToggleCrossfeed, they never have crossfeed
                 // when staging is enabled.
@@ -1508,7 +1511,7 @@ FUNCTION stinfo {
                 } ELSE {
                     IF dbg { mLog("   C: skip: "+child:TITLE+" / assume epd"). }
                 }
-            } ELSE IF child:TYPENAME = "Decoupler" AND child:NAME:STARTSWITH("EnginePlate") {
+            } ELSE IF dectyp:CONTAINS(child:TYPENAME) AND child:NAME:STARTSWITH("EnginePlate") {
                 // Check if we go to EP. Go only if we are an engine, epa is set, or epd is not set.
                 LOCAL kTag TO p:GETMODULE("KOSNameTag"):GETFIELD("name tag").
                 IF child:DECOUPLER = p:DECOUPLER {
@@ -1548,7 +1551,7 @@ FUNCTION stinfo {
                 } ELSE {
                     IF dbg { mLog("   P: skip: "+p:PARENT:TITLE+" / no-epa"). }
                 }
-            } ELSE IF p:PARENT:TYPENAME = "Decoupler" AND p:PARENT:NAME:STARTSWITH("EnginePlate"){
+            } ELSE IF dectyp:CONTAINS(p:PARENT:TYPENAME) AND p:PARENT:NAME:STARTSWITH("EnginePlate"){
                 // Check if we go to EP. Go only if we are an engine, epa is set, or epd is not set.
                 LOCAL kTag TO p:GETMODULE("KOSNameTag"):GETFIELD("name tag").
                 IF p:PARENT:DECOUPLER = p:DECOUPLER {
@@ -1570,7 +1573,6 @@ FUNCTION stinfo {
                 IF dbg { mLog("   P: check: "+p:PARENT:TITLE). }
                 eTree(p:PARENT,l+1).
             }
-
         }
 
         RETURN True.
