@@ -1,6 +1,6 @@
 // sinfo.ks - Collect stage stats. Walk the tree starting from an engine recursively
 // Copyright © 2021, 2022, 2023 V. Quetschke
-// Version 0.9.5, 03/19/2023
+// Version 0.9.6, 03/20/2023
 @LAZYGLOBAL OFF.
 
 // Enabling dbg will create a logfile (0:sinfo.log) that can be used for
@@ -226,6 +226,12 @@ FUNCTION stinfo {
                                  // A numeric value of zero or larger is used as pressure.
                                  // Anything else means use current pressure.
 
+    IF SHIP:THRUST > 0 {
+        PRINT " ".
+        PRINT "The sinfo library can only be used when the ship is not under thrust!".
+        PRINT " ".
+        PRINT 1/0.
+    }
     LOCAL sub TO LIST(). // Substage info
     // Initialize a list of zeroes.
     LOCAL stZ TO LIST().
