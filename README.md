@@ -52,9 +52,9 @@ The ``xm2.ks`` script uses the ``sinfo.ks`` library to calculate the cummulative
      Syntax: ``run LauLAN(targetAltkm=80,targetIncl=0,lauLAN=78).``
 - ``LauTarget.ks``    Script to launch into orbit with inclination and LAN from selected target.<br>
      Syntax: ``run LauLAN(targetAltkm=80).``
-- ``LauEject.ks``     Script to launch into target orbit with ejection angle provided by Transfer
+- ``LauEject.ks``     Script to launch into target orbit with ejection angle at the given time. Ejection info is provided by Transfer
      Window Planner. See Mike Aben's Eve/Moho Flyby Build https://youtu.be/pvl8zILT5Wc?t=1498 for an example.<br>
-     Syntax: ``run LauEject(targetAltkm=80,targetIncl=5,ejectAng=5).``
+     Syntax: ``run LauEject(targetAltkm=100,targetIncl=5,ejectAng=90,inDays=0,inHours=0,inMins=0,proDV=100,normDV=0).``
 
 
 ### Script to automatically dock to another vessel
@@ -73,9 +73,11 @@ These script are called by some of the scripts listed above or can be used indep
     Syntax: ``run Align(orientation=n).``
 - ``Ascent.ks``       Helper script for launch scripts to launch into target orbit.
 - ``CircAtAP.ks``     Script that creates a maneuver node to circularize at next apoapsis.<br>
-    Syntax: ``run CircAtAP.ks.``
+    Syntax: ``run CircAtAP.``
 - ``CircAtPE.ks``     Script that creates a maneuver node to circularize at next periapsis.<br>
-    Syntax: ``run CircAtPE.ks.``
+    Syntax: ``run CircAtPE.``
+- ``SetEjMN.ks``      Script that creates a maneuver node at the ejection angle at the given time with given prograde and normal DV.<br>
+    Syntax: ``run SetEjMN(ejectAng=90,inDays=0,inHours=0,inMins=0,proDV=100,normDV=0).``
 - ``libcommon.ks``    A library providing the following function:<br>
     Syntax: ``nuform(nmber,lead,precision)``  A function to format a string from a number with leading
             characters and trailing digits.
