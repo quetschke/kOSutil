@@ -1,6 +1,6 @@
 // LauLAN.ks - Launch into LAN script
-// Copyright © 2021 V. Quetschke
-// Version 0.3, 09/21/2021
+// Copyright © 2021, 2023 V. Quetschke
+// Version 0.3.1, 04/15/2023
 @LAZYGLOBAL OFF.
 
 // Launch into target orbit with given LAN. Default setting is Minmus inclination and LAN.
@@ -103,4 +103,4 @@ WAIT 1.
 PRINT "1".
 WAIT 1. 
 
-RUNPATH("LauIn",targetAltkm,lauIncl,lauminutes-3/60,lauEarly).
+RUNPATH("LauIn",targetAltkm,lauIncl,lauminutes,lauEarly).
