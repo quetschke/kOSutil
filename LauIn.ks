@@ -1,16 +1,16 @@
 // LauIn.ks - Launch in number of minutes script
-// Copyright © 2021, 2022 V. Quetschke
-// Version 0.14, 11/20/2022
+// Copyright © 2021, 2022, 2023 V. Quetschke
+// Version 0.15, 04/16/2023
 @LAZYGLOBAL OFF.
 
 // Launch into target orbit in given number of minutes, with an optional parameter to launch a given number
-// of minutes early. Default setting is in 5min, with 0 min early launch. The early launch time is to
-// for the ascent when aiming for a LAN or ejection angle.
+// of minutes early. Default setting is in 5min, with 0 min early launch. The early launch parameter can
+// be used to to fine tune the orbit when aiming for a LAN or ejection angle.
 
 // Note: This scribt needs an external library from:
 //       https://github.com/KSP-KOS/KSLib.
 // Place https://github.com/KSP-KOS/KSLib/blob/master/library/lib_num_to_formatted_str.ks
-// into the same directory as LauLAN.ks.
+// into the same directory as this script.
 
 // Parameters
 DECLARE PARAMETER targetAltkm IS 80,
