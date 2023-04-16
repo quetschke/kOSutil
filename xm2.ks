@@ -1,7 +1,27 @@
 // xm2.ks - Execute maneuver node script
 // Copyright © 2021, 2022, 2023 V. Quetschke
-// Version 0.7.6, 03/19/2023
+// Version 0.7.7, 04/16/2023
 @LAZYGLOBAL OFF.
+
+// Script to perform a multi-stage maneuver.
+// The script takes the following parameter:
+//   SRBman .. FALSE (default) - execute the maneuver assuming that all engines can be controlled with the
+//             Throtte.
+//             TRUE - Assume the first stage to ignite is a SRB. SRBs are ignited via staging and need a
+//             stage before them. (SRBs cannot be ignited via the throttle.) Accordingly stages that
+//             appear to have 0 DV must be kept to allow the next staging event to ignite the SRB.
+//             Only use SRBman = FALSE if your first stage to ignite is a SRB!
+
+DECLARE PARAMETER
+    SRBman IS FALSE. // SRBman = TRUE removes the ability to stretch the burn by manipulating the throttle
+                     // and does not remove empty (0 DV) stages early.
+
+IF SRBman:TYPENAME <> "Boolean" {
+    PRINT " ".
+    PRINT "SRBman parameter must be of type Boolean. Abort!".
+    PRINT " ".
+    PRINT 1/0.
+}
 
 // Store current IPU value.
 LOCAL myIPU TO CONFIG:IPU.
@@ -32,6 +52,7 @@ LOCAL TLimit TO 1. // Used to implement throttle limit for short burns
 LOCAL NodedV0 to MyNode:DELTAV.
 LOCAL BurnDV TO 0. // This should become the same as NodedV0, but pieced together.
 LOCAL sISP TO getISP(). // Current stage ISP
+LOCAL CurVDV TO 0. // Current total vacuum DV from sinfo.
 
 LOCAL CanThrottle TO FALSE.
 
@@ -49,17 +70,8 @@ PRINT " ".
 PRINT " ".
 PRINT " ".
 
-// Sanity checks
-
-// Check if rocket has enough delta v for maneuver
-IF MyNode:BURNVECTOR:MAG > SHIP:DELTAV:CURRENT {
-    PRINT "".
-    PRINT "Not enough delta v to complete node! Abort!".
-    SET axx TO 1/0.
-}
-
-// Remove empty stages
-UNTIL SHIP:STAGEDELTAV(SHIP:STAGENUM):VACUUM > 0 {
+// Remove empty stages unless the SRBman parameter is true.
+UNTIL SRBman OR SHIP:STAGEDELTAV(SHIP:STAGENUM):VACUUM > 0 {
     IF SHIP:STAGENUM = 0 {
         PRINT "No stages with dV left! Abort!".
         PRINT 1/0.
@@ -102,7 +114,6 @@ IF si:TYPENAME() = "List" {
     SET axx TO 1/0.
 }
 
-PRINT "Ship delta v: "+ROUND(SHIP:DELTAV:CURRENT,1).
 PRINT "s: SMass EMass DMass sTWR eTWR     Ft    ISP     dV   time".
 FROM {local s is 0.} UNTIL s > STAGE:NUMBER STEP {set s to s+1.} DO {
     PRINT s+":"+nuform(si[s]:SMass,3,2)+nuform(si[s]:EMass,3,2)
@@ -110,6 +121,16 @@ FROM {local s is 0.} UNTIL s > STAGE:NUMBER STEP {set s to s+1.} DO {
         +nuform(si[s]:maxTWR,3,1)+nuform(si[s]:FtV,5,1)
         +nuform(si[s]:KERispV,5,1)+nuform(si[s]:Vdv,5,1)
         +nuform(si[s]:dur,5,1).
+    SET CurVDV TO CurVDV+si[s]:Vdv.
+}
+PRINT "Ship delta v: "+ROUND(CurVDV,1)+" / "+ROUND(SHIP:DELTAV:VACUUM,1)+" (KSP)".
+
+// Check if rocket has enough delta v for maneuver
+IF MyNode:BURNVECTOR:MAG > CurVDV {
+    PRINT " ".
+    PRINT "Not enough delta v to complete node! Abort!".
+    SET axx TO 1/0.
+    PRINT " ".
 }
 
 // This part doesn't use TLimit
@@ -120,13 +141,15 @@ IF MyNode:BURNVECTOR:MAG < SHIP:STAGEDELTAV(SHIP:STAGENUM):CURRENT {
     SET CanThrottle TO TRUE.
 } ELSE IF MyNode:BURNVECTOR:MAG / 2 < SHIP:STAGEDELTAV(SHIP:STAGENUM):CURRENT {
     PRINT " ".
-    PRINT "Multi stage maneuver with more than half of the DV in the current stage!".
+    PRINT "Multi stage maneuver with more than half of the DV in the".
+    PRINT "current stage!".
     SET BurnDur2 TO BurnTimeP(MASS,MyNode:BURNVECTOR:MAG/2,sISP,AVAILABLETHRUST).
 } ELSE {
     LOCAL cumDV TO 0.
     LOCAL cumTi TO 0.
     PRINT " ".
-    PRINT "Multi stage maneuver with less than half of the DV in the current stage!".
+    PRINT "Multi stage maneuver with less than half of the DV in the".
+    PRINT "current stage!".
     LOCAL s TO STAGE:NUMBER.
     // Prediction for half the burn time:
     UNTIL cumDV > MyNode:BURNVECTOR:MAG/2 {
@@ -146,6 +169,9 @@ IF MyNode:BURNVECTOR:MAG < SHIP:STAGEDELTAV(SHIP:STAGENUM):CURRENT {
         SET s TO s-1.
     }
     SET BurnDur2 TO cumTi.
+    IF SRBman {
+        SET BurnDur2 TO BurnDur2-StagingDur+0.02. // SRBs ignite on STAGE, remove the wait for StagingDur.
+    }
 }
 // Prediction for the full burn time BurnDur for statistics and burn time debugging.
 {
@@ -175,12 +201,15 @@ IF MyNode:BURNVECTOR:MAG < SHIP:STAGEDELTAV(SHIP:STAGENUM):CURRENT {
         SET s TO s-1.
     }
     SET BurnDur TO cumTi.
+    IF SRBman {
+        SET BurnDur TO BurnDur-StagingDur+0.02. // SRBs ignite on STAGE, remove the wait for StagingDur.
+    }
 }
 //PRINT "NodeDV: "+ROUND(NodedV0:MAG,2)+" BurnDV: "+ROUND(BurnDV,2).
 PRINT "Predicted burn duration: "+nuform(BurnDur,3,4)+"s".
 
-// Check for too short burns
-IF BurnDur < 5 {
+// Check for too short burns and stretch burn duration to 5s, except for SRBman = TRUE.
+IF BurnDur < 5 AND NOT SRBman {
     SET TLimit TO BurnDur / 5.
     SET BurnDur TO BurnDur/TLimit.
     SET BurnDur2 TO BurnDur2/TLimit.
@@ -330,11 +359,13 @@ WAIT UNTIL KUNIVERSE:TIMEWARP:ISSETTLED.
 PRINT "Spare seconds to node: "+ROUND(WarpEnd-TIME:SECONDS,1).
 PRINT " ".
 
-//staging
-LOCAL stageThrust to MAXTHRUST. // MAXTHRUST updates based on mass and fuel left
+// MAXTHRUST updates based on mass and fuel left. With SRBman TRUE this is likely 0.
+LOCAL stageThrust to MAXTHRUST.
 LOCAL cTWR TO AVAILABLETHRUST*TLimit/SHIP:MASS/CONSTANT:g0.
 PRINT "Stage "+STAGE:NUMBER+" ready. Trust: "+round(AVAILABLETHRUST*TLimit,0)+" kN "+
       "TWR: "+round(cTWR,2).
+// Perform staging if needed. SRBman uses stageThrust to trigger a timed stage on ignition
+// because THROTTLE doesn't work with SRBs.
 WHEN MAXTHRUST<stageThrust THEN { // No more fuel?
     if runXMN = false
         RETURN false.
@@ -395,6 +426,9 @@ IF TIME:SECONDS > NodeTime-BurnDur2-0.02 {
 
 WAIT UNTIL TIME:SECONDS > NodeTime-BurnDur2-0.02.
 LOCK THROTTLE to TLimit. // Directly after the WAIT command. PRINT takes time!
+// Trigger a staging event for SRBs if needed
+IF SRBman AND stageThrust = 0 { SET stageThrust TO 0.1. }
+
 LOCAL StartTime TO TIME:SECONDS.
 PRINT "Deviation from ignition time: "+ROUND(StartTime-(NodeTime-BurnDur2-0.02),2).
 
@@ -414,29 +448,33 @@ PRINT "Est. burn time to Node:    "+nuform(BurnDur2,2,2)+"s".
 PRINT "Missed by:                 "+nuform((0.5-NodeDV2/NodedV0:MAG)*2*BurnDur2,2,2)+"s".
 PRINT "Positive number means burn started early, negative means late.".
 
-// Stretch the last 1/4 second to 3 secondss
-PRINT "Waiting for 0.25s remaining burn time ...".
-WAIT UNTIL CanThrottle AND BurnTimeC() < 0.25.
-LOCAL EndTime TO TIME:SECONDS.  // Note, this is 1/4 second too early
-
-PRINT "Extend burn to 3s.".
-LOCAL TSET TO TLimit*BurnTimeC()/3.
-LOCK THROTTLE TO TSET.
-PRINT "Set throttle: "+ROUND(TSET,2).
+LOCAL EndTime TO 0.
+// Stretch the last 1/4 second to 3 seconds, except for SRBman = TRUE.
+IF NOT SRBman {
+    PRINT "Waiting for 0.25s remaining burn time ...".
+    WAIT UNTIL CanThrottle AND BurnTimeC() < 0.25.
+    SET EndTime TO TIME:SECONDS+0.25.  // Include the 1/4 second that is stretched
+    PRINT "Extend burn to 3s.".
+    LOCAL TSET TO TLimit*BurnTimeC()/3.
+    LOCK THROTTLE TO TSET.
+    PRINT "Set throttle: "+ROUND(TSET,2).
+}
 PRINT " ".
-PRINT "Predicted burn time:       "+nuform(BurnDur,2,2)+"s".
-PRINT "Actual burn time:          "+nuform(EndTime-StartTime+0.25,2,2)
-      +"s ("+nuform((EndTime-StartTime+0.25)/BurnDur*100,3,2)+"%)".
-PRINT " ".
-
 
 // Me:
-WAIT UNTIL VDOT(NodedV0, MyNode:DELTAV) < 0.
+WAIT UNTIL VDOT(NodedV0, MyNode:DELTAV) < 0 .
 // M. Aben:
 //WAIT UNTIL VANG(NodedV0, MyNode:DELTAV) > 3.5.
 
 LOCK THROTTLE TO 0.
+IF SRBman {
+    SET EndTime TO TIME:SECONDS.
+    PRINT "SRB mode. Remaining maneuver DV: "+ROUND(MyNode:BURNVECTOR:MAG,1)
+          +" / DV left in STAGE: "+ROUND(STAGE:DELTAV:CURRENT,1).
+}
 PRINT "Burn completed!".
+PRINT "Actual burn time:          "+nuform(EndTime-StartTime,2,2)
+      +"s ("+nuform((EndTime-StartTime)/BurnDur*100,3,2)+"%)".
 
 //RCS OFF.
 SAS ON.
