@@ -1,6 +1,6 @@
 // xm2.ks - Execute maneuver node script
 // Copyright © 2021, 2022, 2023 V. Quetschke
-// Version 0.7.7, 04/16/2023
+// Version 0.7.8, 06/24/2023
 @LAZYGLOBAL OFF.
 
 // Script to perform a multi-stage maneuver.
@@ -55,6 +55,8 @@ LOCAL sISP TO getISP(). // Current stage ISP
 LOCAL CurVDV TO 0. // Current total vacuum DV from sinfo.
 
 LOCAL CanThrottle TO FALSE.
+
+LOCAL ECatStart TO SHIP:ELECTRICCHARGE. // Charge at start of xm2.
 
 CLEARSCREEN.
 PRINT " Execute maneuver script".
@@ -281,7 +283,16 @@ WHEN defined runXMN then {
     PRINT ROUND(BL,1)+"s   " at (27,5).
     PRINT ROUND(BL2,1)+"s   " at (27,6).
     PRINT ROUND((TIME:SECONDS-loopTime)*1000,1)+"   " AT (22,7).
-    // Todo: When burning in atmosphere stageThrust can changed. See Ascent.ks.
+    IF SHIP:ELECTRICCHARGE < ECatStart*0.05 {
+        SET KUNIVERSE:TIMEWARP:RATE TO 1.
+        PRINT " ".
+        PRINT "Aborted xm2.ks because of low charge ..".
+        PRINT " ".
+        KUNIVERSE:PAUSE().
+        WAIT UNTIL KUNIVERSE:TIMEWARP:ISSETTLED.
+        PRINT 1/0.
+    }
+    // Todo: When burning in atmosphere stageThrust can change. See Ascent.ks.
     SET loopTime TO TIME:SECONDS.
     RETURN runXMN.  // Removes the trigger when runXMN is false
 }
@@ -330,8 +341,9 @@ UNTIL TIME:SECONDS > WarpEnd-WarpStopTime {
     IF TERMINAL:INPUT:HASCHAR {
         LOCAL input TO TERMINAL:INPUT:GETCHAR().
         IF input = TERMINAL:INPUT:DELETERIGHT {
+            SET KUNIVERSE:TIMEWARP:RATE TO 1.
             PRINT " ".
-            PRINT "Aborted LauIN.ks ..".
+            PRINT "Aborted xm2.ks ..".
             PRINT " ".
             PRINT " ".
             PRINT 1/0.
@@ -414,7 +426,7 @@ WHEN MAXTHRUST<stageThrust THEN { // No more fuel?
     PRINT "              Stage dur.: "+ROUND(TIME:SECONDS-stTime,2).
     //PRINT "BurnTimeC: "+BurnTimeC().
     //PRINT "STAGE:DELTAV:CURRENT "+STAGE:DELTAV:CURRENT.
-    RETURN true.
+    RETURN TRUE.
 }
 
 // Wait for alignment and predicted time to start the burn. (Minus a physics cycle.)
@@ -447,12 +459,28 @@ PRINT "Remaining DV at node time: "+nuform(100*NodeDV2 / NodedV0:MAG,2,2)+"%".
 PRINT "Est. burn time to Node:    "+nuform(BurnDur2,2,2)+"s".
 PRINT "Missed by:                 "+nuform((0.5-NodeDV2/NodedV0:MAG)*2*BurnDur2,2,2)+"s".
 PRINT "Positive number means burn started early, negative means late.".
+PRINT " ".
+PRINT "Executing node... Press 'delete' to abort burn early.".
+
+// Abort burn early
+LOCAL stopEarly TO FALSE.
+WHEN TERMINAL:INPUT:HASCHAR THEN {
+    LOCAL input TO TERMINAL:INPUT:GETCHAR().
+    IF input = TERMINAL:INPUT:DELETERIGHT {
+        SET stopEarly TO TRUE.
+        PRINT " ".
+        PRINT "Aborted burn early ..".
+        PRINT " ".
+        RETURN FALSE.
+    }
+    RETURN TRUE.
+}
 
 LOCAL EndTime TO 0.
 // Stretch the last 1/4 second to 3 seconds, except for SRBman = TRUE.
 IF NOT SRBman {
     PRINT "Waiting for 0.25s remaining burn time ...".
-    WAIT UNTIL CanThrottle AND BurnTimeC() < 0.25.
+    WAIT UNTIL CanThrottle AND BurnTimeC() < 0.25 OR stopEarly.
     SET EndTime TO TIME:SECONDS+0.25.  // Include the 1/4 second that is stretched
     PRINT "Extend burn to 3s.".
     LOCAL TSET TO TLimit*BurnTimeC()/3.
@@ -461,8 +489,9 @@ IF NOT SRBman {
 }
 PRINT " ".
 
+
 // Me:
-WAIT UNTIL VDOT(NodedV0, MyNode:DELTAV) < 0 .
+WAIT UNTIL VDOT(NodedV0, MyNode:DELTAV) < 0 OR stopEarly.
 // M. Aben:
 //WAIT UNTIL VANG(NodedV0, MyNode:DELTAV) > 3.5.
 
