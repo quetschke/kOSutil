@@ -1,6 +1,6 @@
 // LauEject.ks - Launch into inclination before ejection script
 // Copyright © 2021, 2022, 2023 V. Quetschke
-// Version 0.33, 04/15/2023
+// Version 0.34, 06/11/2023
 @LAZYGLOBAL OFF.
 
 // Launch into target orbit with ejection angle provided by Transfer Window
@@ -126,8 +126,10 @@ WAIT 1.
 RUNPATH("LauIn",targetAltkm,lauIncl,lauminutes,lauEarly).
 
 // Now create maneuver node at ejection angle.
+LOCAL NoSp TO TIMESPAN(NodeTime-TIME:SECONDS).
 PRINT " ".
-PRINT "Press 'delete' key to create node at ejection angle ...".
+PRINT "Press 'delete' key to create node at ejection angle in".
+PRINT "   "+FLOOR(NoSp:DAYS)+"d "+NoSp:HOUR+"h "+NoSp:MINUTE+"m.".
 PRINT " ".
 UNTIL FALSE {
     IF TERMINAL:INPUT:HASCHAR {
@@ -136,5 +138,4 @@ UNTIL FALSE {
         }
     }
 }
-LOCAL NoSp TO TIMESPAN(NodeTime-TIME:SECONDS).
-RUNPATH("SetEjMN",ejectAngRe, ROUND(NoSp:DAYS), NoSp:HOUR, NoSp:MINUTE, proDV, normDV).
+RUNPATH("SetEjMN",ejectAngRe, FLOOR(NoSp:DAYS), NoSp:HOUR, NoSp:MINUTE, proDV, normDV).

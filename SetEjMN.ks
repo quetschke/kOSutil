@@ -1,6 +1,6 @@
 // SetEjMN.ks - Set ejection node based on transfer window planner information.
 // Copyright © 2023 V. Quetschke
-// Version 0.1, 04/16/2023
+// Version 0.1.1, 04/17/2023
 @LAZYGLOBAL OFF.
 
 // Creates a node at the time of the event at the ejction angle. See LauEject for more
@@ -31,14 +31,15 @@ RUNONCEPATH("lib_num_to_formatted_str").
 
 CLEARSCREEN.
 PRINT "Create maneuver at ejection angle.".
-PRINT "+-----------------------------------------+ ".
-PRINT "|                                         | ".
-PRINT "|                                         | ".
-PRINT "|                                         | ".
-PRINT "|                                         | ".
-PRINT "|                                         | ".
-PRINT "|                                         | ".
-PRINT "+-----------------------------------------+ ".
+PRINT "+--------------------------------------------------------+ ".
+PRINT "|                                                        | ".
+PRINT "|                                                        | ".
+PRINT "|                                                        | ".
+PRINT "|                                                        | ".
+PRINT "|                                                        | ".
+PRINT "|                                                        | ".
+PRINT "|                                                        | ".
+PRINT "+--------------------------------------------------------+ ".
 
 // Functions
 FUNCTION degRound {
@@ -124,7 +125,8 @@ IF gDiff > 0 {
 } ELSE {
     SET lauEarly to gDiff - (-90).
 }
-PRINT "| Angle diff. AN to node: "+ROUND(gDiff,1)+" deg" AT(0,6).
-PRINT "| Launched early by approx. "+ROUND(lauEarly)+" min." AT(0,7).
+PRINT "| For launch from orbit with ejection inclination only:" AT(0,6).
+PRINT "| Angle diff. AN to node: "+ROUND(gDiff,1)+" deg" AT(0,7).
+PRINT "| Launched early by approx. "+ROUND(lauEarly)+" min." AT(0,8).
 PRINT " ".
 PRINT " ".
